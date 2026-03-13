@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minh Chủ BXH System</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+
+<nav class="nav">
+  <button class="nav-btn active" onclick="showPage('bxh')"><i class="fa-solid fa-trophy"></i> BXH</button>
+  <button class="nav-btn" onclick="showPage('enter')"><i class="fa-solid fa-pen-to-square"></i> Nhập liệu</button>
+  <button class="nav-btn" onclick="showPage('members')"><i class="fa-solid fa-users"></i> Thành viên</button>
+  <button class="nav-btn" onclick="showPage('history')"><i class="fa-solid fa-clock-rotate-left"></i> Lịch sử</button>
+  <button class="nav-btn" onclick="showPage('settings')"><i class="fa-solid fa-gear"></i> Cài đặt</button>
+</nav>
+
+<div id="page-bxh" class="page active">
+  <div class="page-header">
+    <div class="page-title">BẢNG XẾP HẠNG RƯƠNG</div>
+    <div class="page-sub" id="bxh-week-label">Cập nhật tự động</div>
+  </div>
+  <div id="bxh-content"></div>
+</div>
+
+<div id="page-enter" class="page">
+  <div class="page-header">
+    <div class="page-title">NHẬP LIỆU</div>
+    <div class="page-sub">Chọn thành viên để cập nhật điểm</div>
+  </div>
+
+  <div class="card">
+    <div class="search-box">
+      <input type="text" id="search-entry" placeholder="Tìm tên thành viên (gõ @ để mở danh sách)..." onkeydown="handleAtOpenList(event)" onkeyup="renderEntryList()">
+    </div>
+    <div class="list-container" id="entry-member-list"></div>
+  </div>
+
+  <div class="card" id="entry-form" style="display:none;">
+    <div class="card-title" style="display:flex; justify-content:space-between">
+      <span id="form-title">Đang chọn: </span>
+      <button class="btn btn-sm" onclick="closeEntryForm()">✕ Đóng</button>
+    </div>
+    
+    <div class="stat-grid">
+      <div>
+        <div style="color:var(--text-dim); font-size:0.8rem; margin-bottom:0.3rem"><i class="fa-solid fa-skull"></i> Diệt địch thành thị (Hiện: <span id="cur-kill" style="color:var(--gold)">0</span>)</div>
+        <div class="input-row">
+          <button class="add-toggle active" id="btn-add-kill" onclick="toggleAdd('kill')" title="Bật/tắt cộng dồn">＋</button>
+          <input type="number" id="inp-kill" placeholder="Nhập số cần cộng thêm...">
+        </div>
+      </div>
+      
+      <div>
+        <div style="color:var(--text-dim); font-size:0.8rem; margin-bottom:0.3rem"><i class="fa-solid fa-chess-rook"></i> Phá thành (Hiện: <span id="cur-destroy" style="color:var(--gold)">0</span>)</div>
+        <div class="input-row">
+          <button class="add-toggle active" id="btn-add-destroy" onclick="toggleAdd('destroy')" title="Bật/tắt cộng dồn">＋</button>
+          <input type="number" id="inp-destroy" placeholder="Nhập số cần cộng thêm...">
+        </div>
+      </div>
+
+      <div>
+        <div style="color:var(--text-dim); font-size:0.8rem; margin-bottom:0.3rem"><i class="fa-solid fa-tower-observation"></i> Tổng lượt tăng tốc tháp (Hiện: <span id="cur-tower" style="color:var(--gold)">0</span>)</div>
+        <div class="input-row">
+          <button class="add-toggle" style="opacity:0.5; cursor:not-allowed">＝</button>
+          <input type="number" id="inp-tower" placeholder="Nhập TỔNG SỐ lượt tháp (ghi đè)...">
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.3rem">* Tháp canh không cộng dồn, nhập vào sẽ thay thế số cũ.</div>
+      </div>
+    </div>
+
+    <button class="btn btn-gold mt-1" style="width:100%" onclick="saveEntry()"><i class="fa-solid fa-floppy-disk"></i> Lưu thông số</button>
+  </div>
+</div>
+
+<div id="page-members" class="page">
+  <div class="page-header">
+    <div class="page-title">QUẢN LÝ THÀNH VIÊN</div>
+  </div>
+  
+  <div class="card">
+    <div class="input-row">
+      <input type="text" id="inp-new-member" placeholder="Nhập tên thành viên mới..." onkeypress="if(event.key==='Enter')addMember()">
+      <button class="btn btn-gold" onclick="addMember()">Thêm</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="search-box">
+      <input type="text" id="search-member" placeholder="Lọc danh sách..." onkeyup="renderMemberList()">
+    </div>
+    <div class="list-container" id="full-member-list"></div>
+  </div>
+</div>
+
+<div id="page-history" class="page">
+  <div class="page-header">
+    <div class="page-title">LỊCH SỬ NHẬP LIỆU</div>
+    <div class="page-sub">Chỉ lưu 50 thao tác gần nhất</div>
+  </div>
+  <div class="card table-responsive" id="history-content"></div>
+</div>
+
+<div id="page-settings" class="page">
+  <div class="page-header">
+    <div class="page-title">CÀI ĐẶT & QUY TẮC</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-cloud"></i> Đồng bộ dữ liệu (điện thoại ↔ máy tính)</div>
+    <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:1rem">
+      App sẽ đồng bộ thật qua Cloud bằng Firebase/Firestore. Dán <b>Firebase config</b> (dạng JSON) vào ô dưới, rồi bấm Lưu.
+    </p>
+    <textarea id="inp-fb-config" style="width:100%; height:92px; background:var(--bg-mid); border:1px solid var(--border-gold); color:var(--text-main); padding:0.6rem; border-radius:6px; font-family:monospace;" placeholder='Ví dụ: {"apiKey":"...","authDomain":"...","projectId":"..."}'></textarea>
+    <div class="flex-row" style="margin-top:0.6rem">
+      <button class="btn btn-gold" onclick="saveFirebaseConfig()">Lưu config</button>
+      <button class="btn btn-red" onclick="clearFirebaseConfig()">Xóa config</button>
+    </div>
+    <div class="flex-row">
+      <button class="btn btn-gold" onclick="connectCloud()"><i class="fa-solid fa-plug"></i> Kết nối Cloud</button>
+      <button class="btn btn-red" onclick="disconnectCloud()"><i class="fa-solid fa-plug-circle-xmark"></i> Ngắt</button>
+    </div>
+    <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.5rem">
+      Trạng thái: <span id="cloud-status" style="color:var(--gold)">Chưa kết nối</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Quản Lý Dữ Liệu</div>
+    <div class="flex-row">
+      <button class="btn btn-gold" onclick="syncNow()"><i class="fa-solid fa-rotate"></i> Đồng bộ ngay</button>
+      <button class="btn btn-red" onclick="resetWeek()"><i class="fa-solid fa-arrow-rotate-left"></i> Reset số liệu tuần này</button>
+      <button class="btn btn-gold" onclick="copyBXH()"><i class="fa-solid fa-copy"></i> Copy text BXH</button>
+    </div>
+    <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.5rem">* Nút Reset chỉ xóa điểm (về 0), không xóa danh sách thành viên.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Quy Tắc Rương Đang Áp Dụng</div>
+    <ul style="font-size:0.85rem; color:var(--text-dim); line-height:1.6; padding-left:1rem">
+      <li><strong style="color:var(--gold)">Rương 1 (x10)</strong>: Top 9 Diệt Địch + 1 slot kế toán.</li>
+      <li><strong style="color:var(--gold)">Rương 2 (x10)</strong>: Top 5 Diệt Địch (tiếp) + Top 5 Tháp.</li>
+      <li><strong style="color:var(--gold)">Rương 3 (x15)</strong>: Top 10 Phá Thành + Top 5 Tháp (tiếp).</li>
+      <li><strong style="color:var(--gold)">Rương 4 (x15)</strong>: Top 5 Tháp + Top 5 Diệt + Top 5 Phá (loại trừ những người đã nhận rương trên).</li>
+    </ul>
+  </div>
+</div>
+
+<div id="toast">Thông báo</div>
+
+<!-- Firebase (optional, used for cloud sync) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="script.js"></script>
+</body>
+</html>
