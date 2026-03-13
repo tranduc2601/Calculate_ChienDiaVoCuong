@@ -9,7 +9,8 @@ let state = {
   meta: {
     updatedAt: 0,
     weekAnchorMs: 0, // computed "week start" anchor (Mon 21:00)
-    weekLabel: ""
+    weekLabel: "",
+    manualRange: null // {startMs, endMs}
   },
   memberLogs: [] // {id, kind, payload, time}
 };
@@ -78,8 +79,28 @@ function ensureWeek() {
     bumpUpdatedAt();
     saveAll();
   }
+  updateWeekLabelView();
+}
+
+function updateWeekLabelView() {
   const lbl = document.getElementById('bxh-week-label');
-  if (lbl) lbl.textContent = state.meta.weekLabel || 'Cập nhật tự động';
+  if (!lbl) return;
+  const meta = state.meta || {};
+  let label = '';
+  if (meta.manualRange && meta.manualRange.startMs && meta.manualRange.endMs) {
+    const s = new Date(meta.manualRange.startMs);
+    const e = new Date(meta.manualRange.endMs);
+    const f = (x) => x.toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    label = `Khung thủ công: ${f(s)} → ${f(e)}`;
+  } else {
+    label = meta.weekLabel || 'Cập nhật tự động theo tuần';
+  }
+  if (meta.updatedAt) {
+    const t = new Date(meta.updatedAt);
+    const tStr = t.toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    label += ` • Lần cập nhật gần nhất: ${tStr}`;
+  }
+  lbl.textContent = label;
 }
 
 function getTowerWeekFor(memberId) {
@@ -395,16 +416,23 @@ function selectForEntry(id) {
   activeMemberId = id;
   const m = state.members.find(x => x.id === id);
   const s = getStats(id);
+  const weekVal = getTowerWeekFor(id);
   
   document.getElementById('form-title').innerHTML = `Đang thao tác: <strong style="color:var(--gold-light)">${m.name}</strong>`;
   document.getElementById('cur-kill').textContent = s.kills.toLocaleString();
   document.getElementById('cur-destroy').textContent = s.destroy.toLocaleString();
-  document.getElementById('cur-tower').textContent = s.tower.toLocaleString();
+  const elWeek = document.getElementById('cur-tower-week');
+  const elTotal = document.getElementById('cur-tower-total');
+  if (elWeek) elWeek.textContent = weekVal.toLocaleString();
+  if (elTotal) elTotal.textContent = (s.tower || 0).toLocaleString();
   
   // Clear inputs
   document.getElementById('inp-kill').value = '';
   document.getElementById('inp-destroy').value = '';
-  document.getElementById('inp-tower').value = '';
+  const inpStart = document.getElementById('inp-tower-start');
+  const inpEnd = document.getElementById('inp-tower-end');
+  if (inpStart) inpStart.value = '';
+  if (inpEnd) inpEnd.value = '';
   
   document.getElementById('entry-form').style.display = 'block';
   renderEntryList(); // re-render to highlight selected
@@ -456,7 +484,8 @@ function saveEntry() {
   // Lấy dữ liệu từ các ô nhập
   const inKill = parseInt(document.getElementById('inp-kill').value);
   const inDes = parseInt(document.getElementById('inp-destroy').value);
-  const inTow = parseInt(document.getElementById('inp-tower').value);
+  const inTowStart = parseInt(document.getElementById('inp-tower-start')?.value);
+  const inTowEnd = parseInt(document.getElementById('inp-tower-end')?.value);
   
   let changed = false;
 
@@ -476,11 +505,24 @@ function saveEntry() {
     changed = true;
   }
   
-  // Xử lý Tháp (luôn luôn ghi đè)
-  if (!isNaN(inTow)) {
-    let old = s.tower;
-    s.tower = inTow; 
-    logAction(activeMemberId, 'tower', inTow, old);
+  // Xử lý Tháp: nhập đầu tuần & cuối tuần rồi tự tính chênh lệch
+  if (!isNaN(inTowStart) || !isNaN(inTowEnd)) {
+    if (isNaN(inTowStart) || isNaN(inTowEnd)) {
+      toast('Vui lòng nhập đủ cả ĐẦU TUẦN và CUỐI TUẦN cho tháp.');
+      return;
+    }
+    if (inTowEnd < inTowStart) {
+      toast('Số cuối tuần phải lớn hơn hoặc bằng số đầu tuần.');
+      return;
+    }
+    const weekGain = inTowEnd - inTowStart;
+    const old = s.tower;
+    s.tower = inTowEnd; // lưu tổng hiện tại
+    // chỉnh lại baseline cho tuần hiện tại bằng giá trị đầu tuần
+    const anchor = state.meta?.weekAnchorMs || getWeekAnchorMs();
+    if (!state.towerBase) state.towerBase = {};
+    state.towerBase[activeMemberId] = { weekAnchorMs: anchor, baseTotal: inTowStart };
+    logAction(activeMemberId, 'tower', weekGain, old);
     changed = true;
   }
 
@@ -670,8 +712,17 @@ function buildTable(list, valKey, suffix) {
       ${list.map((m,i) => `
         <tr>
           <td width="30"><span class="rank-num ${i<3?'rank-'+(i+1):''}">${i+1}</span></td>
-          <td class="member-name">${m.name}</td>
-          <td align="right" style="color:var(--text-main)">${m[valKey].toLocaleString()} ${suffix}</td>
+          <td>
+            <div class="member-name">${m.name}</div>
+            <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.1rem;">
+              Tổng diệt: <b>${(m.kills || 0).toLocaleString()}</b> • 
+              Tổng phá: <b>${(m.destroy || 0).toLocaleString()}</b> • 
+              Tổng tháp: <b>${(m.tower || 0).toLocaleString()}</b>
+            </div>
+          </td>
+          <td align="right" style="color:var(--text-main); white-space:nowrap;">
+            ${m[valKey].toLocaleString()} ${suffix}
+          </td>
         </tr>
       `).join('')}
     </table>
@@ -736,24 +787,24 @@ function copyBXH() {
   let txt = `TỔNG KẾT RƯƠNG LIÊN MINH\n\n`;
   
   txt += `RƯƠNG 1 (Top 9 Diệt):\n`;
-  r.r1_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.kills.toLocaleString()})\n`);
+  r.r1_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
   
   txt += `\nRƯƠNG 2:\n[Diệt]\n`;
-  r.r2_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.kills.toLocaleString()})\n`);
+  r.r2_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
   txt += `[Tháp]\n`;
-  r.r2_tower.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.towerWeek} lượt)\n`);
+  r.r2_tower.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.towerWeek} lượt trong tuần, tổng tháp: ${m.tower.toLocaleString()})\n`);
   
   txt += `\nRƯƠNG 3:\n[Phá Thành]\n`;
-  r.r3_des.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.destroy.toLocaleString()})\n`);
+  r.r3_des.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
   txt += `[Tháp]\n`;
-  r.r3_tower.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.towerWeek} lượt)\n`);
+  r.r3_tower.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.towerWeek} lượt trong tuần, tổng tháp: ${m.tower.toLocaleString()})\n`);
   
   txt += `\nRƯƠNG 4:\n[Tháp]\n`;
-  r.r4_tow.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.towerWeek} lượt)\n`);
+  r.r4_tow.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.towerWeek} lượt trong tuần, tổng tháp: ${m.tower.toLocaleString()})\n`);
   txt += `[Diệt]\n`;
-  r.r4_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.kills.toLocaleString()})\n`);
+  r.r4_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
   txt += `[Phá Thành]\n`;
-  r.r4_des.forEach((m,i)=> txt += `${i+1}. ${m.name} (${m.destroy.toLocaleString()})\n`);
+  r.r4_des.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
 
   navigator.clipboard.writeText(txt).then(() => toast('Đã copy BXH.'));
 }
@@ -787,6 +838,7 @@ let cloud = {
 function bumpUpdatedAt() {
   if (!state.meta) state.meta = { updatedAt: 0, weekAnchorMs: 0, weekLabel: "" };
   state.meta.updatedAt = Date.now();
+  updateWeekLabelView();
 }
 
 function saveAll() {
@@ -948,6 +1000,49 @@ function syncNow() {
 }
 
 // ==========================================
+// 10. MANUAL TIME RANGE
+// ==========================================
+function applyManualRange() {
+  const inpStart = document.getElementById('manual-start');
+  const inpEnd = document.getElementById('manual-end');
+  if (!inpStart || !inpEnd) return;
+  const vStart = inpStart.value;
+  const vEnd = inpEnd.value;
+  if (!vStart || !vEnd) {
+    toast('Vui lòng nhập đầy đủ thời gian Bắt đầu và Kết thúc.');
+    return;
+  }
+  const startMs = Date.parse(vStart);
+  const endMs = Date.parse(vEnd);
+  if (isNaN(startMs) || isNaN(endMs)) {
+    toast('Định dạng thời gian không hợp lệ.');
+    return;
+  }
+  if (endMs <= startMs) {
+    toast('Thời gian kết thúc phải lớn hơn thời gian bắt đầu.');
+    return;
+  }
+  if (!state.meta) state.meta = {};
+  state.meta.manualRange = { startMs, endMs };
+  bumpUpdatedAt();
+  saveAll();
+  renderBXH();
+}
+
+function clearManualRange() {
+  if (state.meta) {
+    state.meta.manualRange = null;
+  }
+  bumpUpdatedAt();
+  saveAll();
+  renderBXH();
+  const inpStart = document.getElementById('manual-start');
+  const inpEnd = document.getElementById('manual-end');
+  if (inpStart) inpStart.value = '';
+  if (inpEnd) inpEnd.value = '';
+}
+
+// ==========================================
 // INIT
 // ==========================================
 load();
@@ -963,6 +1058,24 @@ try {
   const el = document.getElementById('inp-fb-config');
   if (cfg && el) el.value = JSON.stringify(cfg);
 } catch(e) {}
+
+// Khôi phục khung thời gian thủ công (nếu có)
+window.addEventListener('load', () => {
+  if (state.meta && state.meta.manualRange) {
+    const s = state.meta.manualRange.startMs;
+    const e = state.meta.manualRange.endMs;
+    const toVal = (ms) => {
+      const d = new Date(ms);
+      const pad = (x) => String(x).padStart(2,'0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const inpStart = document.getElementById('manual-start');
+    const inpEnd = document.getElementById('manual-end');
+    if (inpStart && s) inpStart.value = toVal(s);
+    if (inpEnd && e) inpEnd.value = toVal(e);
+  }
+  updateWeekLabelView();
+});
 
 function applyViewModeFromUrl() {
   const q = new URLSearchParams(location.search);

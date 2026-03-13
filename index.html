@@ -62,12 +62,16 @@
       </div>
 
       <div>
-        <div style="color:var(--text-dim); font-size:0.8rem; margin-bottom:0.3rem"><i class="fa-solid fa-tower-observation"></i> Tổng lượt tăng tốc tháp (Hiện: <span id="cur-tower" style="color:var(--gold)">0</span>)</div>
+        <div style="color:var(--text-dim); font-size:0.8rem; margin-bottom:0.3rem"><i class="fa-solid fa-tower-observation"></i> Tăng tốc tháp trong tuần (Hiện: <span id="cur-tower-week" style="color:var(--gold)">0</span> / Tổng: <span id="cur-tower-total" style="color:var(--gold)">0</span>)</div>
         <div class="input-row">
-          <button class="add-toggle" style="opacity:0.5; cursor:not-allowed">＝</button>
-          <input type="number" id="inp-tower" placeholder="Nhập TỔNG SỐ lượt tháp (ghi đè)...">
+          <input type="number" id="inp-tower-start" placeholder="Đầu tuần (số trong game đầu tuần)...">
         </div>
-        <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.3rem">* Tháp canh không cộng dồn, nhập vào sẽ thay thế số cũ.</div>
+        <div class="input-row" style="margin-top:0.4rem">
+          <input type="number" id="inp-tower-end" placeholder="Cuối tuần / hiện tại (số trong game)...">
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.3rem">
+          * Hệ thống sẽ tự tính: <b>lượt trong tuần = cuối - đầu</b>. Bạn chỉ cần copy số trong game đầu tuần và cuối tuần.
+        </div>
       </div>
     </div>
 
@@ -151,6 +155,30 @@ NDX"></textarea>
       <button class="btn btn-gold" onclick="copyBXH()"><i class="fa-solid fa-copy"></i> Copy text BXH</button>
     </div>
     <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.5rem">* Nút Reset chỉ xóa điểm (về 0), không xóa danh sách thành viên.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Khung thời gian BXH</div>
+    <p style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.5rem;">
+      Mặc định hệ thống tự tính tuần từ <b>Thứ 2 21:00 → Chủ nhật 21:00</b>. Nếu cần, bạn có thể nhập thủ công khoảng thời gian muốn tính BXH.
+    </p>
+    <div class="flex-row">
+      <div style="flex:1;">
+        <div style="font-size:0.75rem; color:var(--text-dim); margin-bottom:0.2rem;">Bắt đầu</div>
+        <input type="datetime-local" id="manual-start">
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:0.75rem; color:var(--text-dim); margin-bottom:0.2rem;">Kết thúc</div>
+        <input type="datetime-local" id="manual-end">
+      </div>
+    </div>
+    <div class="flex-row mt-1">
+      <button class="btn btn-gold" onclick="applyManualRange()">Áp dụng</button>
+      <button class="btn btn-red" onclick="clearManualRange()">Xóa khung thủ công</button>
+    </div>
+    <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.4rem;">
+      Nhãn hiện tại trên BXH sẽ tự đổi theo khung bạn nhập. Nếu để trống, hệ thống dùng tuần tự động.
+    </div>
   </div>
 
   <div class="card">
