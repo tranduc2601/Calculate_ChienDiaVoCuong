@@ -2,7 +2,7 @@
 // 1. DATA STATE & STORAGE
 // ==========================================
 let state = {
-  members: [], // {id, name}
+  members: [], // {id, name, joinedAt, isAccountant?}
   stats: {},   // {id: {kills, destroy, tower}}
   logs: [],    // {logId, memberId, type(kill/destroy/tower), amount, oldVal, time}
   towerBase: {}, // {id: {weekAnchorMs, baseTotal}}
@@ -10,7 +10,8 @@ let state = {
     updatedAt: 0,
     weekAnchorMs: 0, // computed "week start" anchor (Mon 21:00)
     weekLabel: ""
-  }
+  },
+  memberLogs: [] // {id, kind, payload, time}
 };
 
 const STORAGE_KEY = 'minhchu_v4';
@@ -28,6 +29,7 @@ function load() {
   });
   if (!state.meta) state.meta = { updatedAt: 0, weekAnchorMs: 0, weekLabel: "" };
   if (!state.towerBase) state.towerBase = {};
+  if (!state.memberLogs) state.memberLogs = [];
 }
 
 function getStats(id) { return state.stats[id] || {kills:0, destroy:0, tower:0}; }
@@ -127,10 +129,11 @@ function addMember() {
     toast('Tên thành viên đã tồn tại.'); return;
   }
   const id = 'mb_' + Date.now();
-  state.members.push({id, name, joinedAt: Date.now()});
+  state.members.push({id, name, joinedAt: Date.now(), isAccountant: false});
   state.stats[id] = {kills:0, destroy:0, tower:0};
   ensureWeek();
   state.towerBase[id] = { weekAnchorMs: state.meta.weekAnchorMs, baseTotal: 0 };
+  logMemberChange('add', { memberId: id, name });
   bumpUpdatedAt();
   saveAll();
   document.getElementById('inp-new-member').value = '';
@@ -138,16 +141,45 @@ function addMember() {
   toast('Đã thêm: ' + name);
 }
 
+function addMemberWithName(rawName) {
+  const name = (rawName || '').trim();
+  if (!name) return false;
+  if(state.members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
+    return false;
+  }
+  const id = 'mb_' + Date.now() + Math.floor(Math.random()*1000);
+  state.members.push({id, name, joinedAt: Date.now(), isAccountant: false});
+  state.stats[id] = {kills:0, destroy:0, tower:0};
+  ensureWeek();
+  state.towerBase[id] = { weekAnchorMs: state.meta.weekAnchorMs, baseTotal: 0 };
+  logMemberChange('add', { memberId: id, name });
+  bumpUpdatedAt();
+  saveAll();
+  return true;
+}
+
 function deleteMember(id) {
   if(confirm('Chắc chắn muốn xóa thành viên này và toàn bộ dữ liệu của họ?')) {
-    state.members = state.members.filter(m => m.id !== id);
+    const m = state.members.find(x => x.id === id);
+    state.members = state.members.filter(mb => mb.id !== id);
     delete state.stats[id];
     if (state.towerBase) delete state.towerBase[id];
+    if (m) logMemberChange('remove', { memberId: id, name: m.name });
     bumpUpdatedAt();
     saveAll();
     renderMemberList();
     toast('Đã xóa thành viên.');
   }
+}
+
+function deleteMemberInternal(id) {
+  const m = state.members.find(x => x.id === id);
+  state.members = state.members.filter(mb => mb.id !== id);
+  delete state.stats[id];
+  if (state.towerBase) delete state.towerBase[id];
+  if (m) logMemberChange('remove', { memberId: id, name: m.name });
+  bumpUpdatedAt();
+  saveAll();
 }
 
 function renderMemberList() {
@@ -159,16 +191,177 @@ function renderMemberList() {
   
   container.innerHTML = list.map(m => {
     const s = getStats(m.id);
+    const flag = m.isAccountant ? '<span style="font-size:0.75rem; color:var(--gold-light); margin-left:0.4rem; border:1px solid var(--border-gold); padding:0.1rem 0.4rem; border-radius:999px;"><i class="fa-solid fa-coins"></i> Kế toán</span>' : '';
     return `
       <div class="list-item">
         <div class="member-info">
-          <span class="member-name">${m.name}</span>
+          <span class="member-name">${m.name}${flag}</span>
           <span class="member-stats"><i class="fa-solid fa-skull"></i> Diệt: ${s.kills.toLocaleString()} | <i class="fa-solid fa-chess-rook"></i> Phá: ${s.destroy.toLocaleString()} | <i class="fa-solid fa-tower-observation"></i> Tháp: ${s.tower.toLocaleString()}</span>
         </div>
-        <button class="btn btn-sm btn-red" onclick="deleteMember('${m.id}')">Xóa</button>
+        <div class="flex-row" style="justify-content:flex-end;">
+          <button class="btn btn-sm" onclick="toggleAccountant('${m.id}')"><i class="fa-solid fa-coins"></i></button>
+          <button class="btn btn-sm" onclick="renameMember('${m.id}')"><i class="fa-solid fa-pen"></i></button>
+          <button class="btn btn-sm btn-red" onclick="deleteMember('${m.id}')">Xóa</button>
+        </div>
       </div>
     `;
   }).join('');
+}
+
+function renameMember(id) {
+  const m = state.members.find(x => x.id === id);
+  if (!m) return;
+  const newNameRaw = prompt('Nhập tên mới cho thành viên:', m.name);
+  if (newNameRaw === null) return;
+  const newName = newNameRaw.trim();
+  if (!newName || newName === m.name) return;
+  if (state.members.some(x => x.id !== id && x.name.toLowerCase() === newName.toLowerCase())) {
+    toast('Tên mới đã tồn tại, hãy chọn tên khác.');
+    return;
+  }
+  const oldName = m.name;
+  m.name = newName;
+  logMemberChange('rename', { memberId: id, oldName, newName });
+  bumpUpdatedAt();
+  saveAll();
+  renderMemberList();
+  renderEntryList();
+  renderBXH();
+  toast('Đã đổi tên.');
+}
+
+function toggleAccountant(id) {
+  const m = state.members.find(x => x.id === id);
+  if (!m) return;
+  m.isAccountant = !m.isAccountant;
+  logMemberChange('accountant', { memberId: id, name: m.name, value: m.isAccountant });
+  bumpUpdatedAt();
+  saveAll();
+  renderMemberList();
+  renderBXH();
+}
+
+// BULK MEMBER OPERATIONS
+function parseBulkNames() {
+  const raw = (document.getElementById('bulk-member-input')?.value || '').split('\n');
+  const names = [];
+  const seen = new Set();
+  raw.forEach(line => {
+    const name = line.trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  });
+  return names;
+}
+
+function bulkAddMembers() {
+  const names = parseBulkNames();
+  if (!names.length) { toast('Chưa có tên nào trong ô hàng loạt.'); return; }
+  let added = 0;
+  names.forEach(n => {
+    if (addMemberWithName(n)) added++;
+  });
+  renderMemberList();
+  renderEntryList();
+  renderBXH();
+  if (added === 0) toast('Tất cả tên đã tồn tại, không có ai được thêm.');
+  else toast('Đã thêm ' + added + ' thành viên mới.');
+}
+
+let bulkOpsQueue = [];
+let bulkOpsCurrent = null;
+let bulkOpsSkipAll = false;
+
+function bulkCheckMembers() {
+  const names = parseBulkNames();
+  if (!names.length) { toast('Chưa có tên nào trong ô hàng loạt.'); return; }
+
+  const desiredSet = new Map();
+  names.forEach(n => desiredSet.set(n.toLowerCase(), n));
+
+  const existing = state.members.map(m => ({
+    id: m.id,
+    name: m.name,
+    key: m.name.toLowerCase()
+  }));
+
+  const toAdd = [];
+  desiredSet.forEach((orig, key) => {
+    if (!existing.some(e => e.key === key)) {
+      toAdd.push({ kind: 'add', name: orig });
+    }
+  });
+
+  const toRemove = [];
+  existing.forEach(e => {
+    if (!desiredSet.has(e.key)) {
+      toRemove.push({ kind: 'remove', id: e.id, name: e.name });
+    }
+  });
+
+  bulkOpsQueue = [...toAdd, ...toRemove];
+  bulkOpsSkipAll = false;
+
+  if (!bulkOpsQueue.length) {
+    toast('Danh sách trùng hoàn toàn, không có gì thay đổi.');
+    return;
+  }
+  showNextBulkOp();
+}
+
+function showNextBulkOp() {
+  if (bulkOpsSkipAll) {
+    hideConfirmModal();
+    return;
+  }
+  bulkOpsCurrent = bulkOpsQueue.shift() || null;
+  if (!bulkOpsCurrent) { hideConfirmModal(); toast('Đã xử lý xong danh sách.'); return; }
+
+  const titleEl = document.getElementById('confirm-modal-title');
+  const bodyEl = document.getElementById('confirm-modal-body');
+  const modal = document.getElementById('confirm-modal');
+  if (!titleEl || !bodyEl || !modal) return;
+
+  if (bulkOpsCurrent.kind === 'add') {
+    titleEl.textContent = 'Thêm thành viên mới?';
+    bodyEl.innerHTML = `Tên: <b>${bulkOpsCurrent.name}</b><br>Bạn có muốn thêm vào danh sách liên minh không?`;
+  } else if (bulkOpsCurrent.kind === 'remove') {
+    titleEl.textContent = 'Loại bỏ thành viên?';
+    bodyEl.innerHTML = `Tên: <b>${bulkOpsCurrent.name}</b><br>Tên này KHÔNG còn trong danh sách nhập. Bạn có muốn xóa khỏi hệ thống không?`;
+  }
+  modal.style.display = 'flex';
+}
+
+function hideConfirmModal() {
+  const modal = document.getElementById('confirm-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function confirmModalApply() {
+  if (!bulkOpsCurrent) { hideConfirmModal(); return; }
+  if (bulkOpsCurrent.kind === 'add') {
+    addMemberWithName(bulkOpsCurrent.name);
+  } else if (bulkOpsCurrent.kind === 'remove') {
+    deleteMemberInternal(bulkOpsCurrent.id);
+  }
+  renderMemberList();
+  renderEntryList();
+  renderBXH();
+  showNextBulkOp();
+}
+
+function confirmModalSkip() {
+  showNextBulkOp();
+}
+
+function confirmModalCancelAll() {
+  bulkOpsQueue = [];
+  bulkOpsCurrent = null;
+  bulkOpsSkipAll = true;
+  hideConfirmModal();
 }
 
 // ==========================================
@@ -230,6 +423,17 @@ function logAction(memberId, type, amount, oldVal) {
     time: new Date().getTime()
   });
   if(state.logs.length > 50) state.logs.pop(); // Keep only last 50
+}
+
+function logMemberChange(kind, payload) {
+  if (!state.memberLogs) state.memberLogs = [];
+  state.memberLogs.unshift({
+    id: 'ml_' + Date.now() + Math.random(),
+    kind,
+    payload,
+    time: Date.now()
+  });
+  if (state.memberLogs.length > 200) state.memberLogs.pop();
 }
 
 function saveEntry() {
@@ -314,18 +518,23 @@ function saveEntry() {
 // ==========================================
 function renderHistory() {
   const container = document.getElementById('history-content');
-  if(state.logs.length === 0) { container.innerHTML = '<div style="padding:1rem; text-align:center">Chưa có dữ liệu.</div>'; return; }
+  const statLogs = state.logs || [];
+  const memberLogs = state.memberLogs || [];
+  if(statLogs.length === 0 && memberLogs.length === 0) { 
+    container.innerHTML = '<div style="padding:1rem; text-align:center">Chưa có dữ liệu.</div>'; 
+    return; 
+  }
   
   const typeNames = { kill: 'Diệt địch', destroy: 'Phá thành', tower: 'Tháp canh' };
   
-  container.innerHTML = `
+  const statTable = statLogs.length ? `
+    <h4 style="font-family:'Cinzel',serif; font-size:0.9rem; color:var(--gold); margin-bottom:0.4rem;">Nhập liệu chỉ số</h4>
     <table>
       <thead><tr><th>Thời gian</th><th>Thành viên</th><th>Thao tác</th><th>Hoàn tác</th></tr></thead>
       <tbody>
-        ${state.logs.map(log => {
+        ${statLogs.map(log => {
           const mName = state.members.find(m => m.id === log.memberId)?.name || 'Đã xóa';
           const time = new Date(log.time).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
-          // Cách hiển thị tuỳ thuộc vào việc nó là cộng dồn hay ghi đè
           const actionText = log.type === 'tower' 
             ? `Cập nhật thành <b>${log.amount}</b>` 
             : `Cộng thêm <b>${log.amount}</b>`;
@@ -341,7 +550,44 @@ function renderHistory() {
         }).join('')}
       </tbody>
     </table>
-  `;
+  ` : '';
+
+  const memberTable = memberLogs.length ? `
+    <h4 style="font-family:'Cinzel',serif; font-size:0.9rem; color:var(--gold); margin:1rem 0 0.4rem;">Lịch sử thành viên</h4>
+    <table>
+      <thead><tr><th>Thời gian</th><th>Thành viên</th><th>Thao tác</th></tr></thead>
+      <tbody>
+        ${memberLogs.map(log => {
+          const time = new Date(log.time).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
+          const p = log.payload || {};
+          let name = p.name || '';
+          if (!name && p.memberId) {
+            const m = state.members.find(x => x.id === p.memberId);
+            if (m) name = m.name;
+          }
+          let action = '';
+          if (log.kind === 'add') {
+            action = 'Thêm thành viên';
+          } else if (log.kind === 'remove') {
+            action = 'Xóa thành viên';
+          } else if (log.kind === 'rename') {
+            action = `Đổi tên từ <b>${p.oldName}</b> thành <b>${p.newName}</b>`;
+          } else if (log.kind === 'accountant') {
+            action = p.value ? 'Đặt làm kế toán' : 'Bỏ kế toán';
+          }
+          return `
+            <tr>
+              <td style="color:var(--text-dim); font-size:0.8rem">${time}</td>
+              <td class="member-name">${name}</td>
+              <td style="font-size:0.85rem">${action}</td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  ` : '';
+
+  container.innerHTML = statTable + memberTable;
 }
 
 function undoLog(logId) {
@@ -561,13 +807,50 @@ function saveFirebaseConfig() {
   const raw = (document.getElementById('inp-fb-config')?.value || '').trim();
   if (!raw) { toast('Chưa có config để lưu.'); return; }
   try {
-    const cfg = JSON.parse(raw);
+    const cfg = parseFirebaseConfigFromText(raw);
     if (!cfg.projectId) throw new Error('Missing projectId');
     localStorage.setItem(CLOUD_CFG_KEY, JSON.stringify(cfg));
     toast('Đã lưu config.');
   } catch(e) {
-    toast('Config không hợp lệ (cần JSON và có projectId).');
+    toast('Config không hợp lệ (cần có projectId).');
   }
+}
+
+function parseFirebaseConfigFromText(text) {
+  // Accept either:
+  // 1) Pure JSON: {"apiKey":"...","projectId":"..."}
+  // 2) Full Firebase snippet that contains: const firebaseConfig = { ... };
+  // 3) Just an object literal: { apiKey: "...", projectId: "..." }
+  const trimmed = (text || '').trim();
+  if (!trimmed) throw new Error('Empty');
+
+  // Fast path: valid JSON already
+  try {
+    const asJson = JSON.parse(trimmed);
+    if (asJson && typeof asJson === 'object') return asJson;
+  } catch(e) {}
+
+  // Try extract object literal
+  let objText = '';
+  const m = trimmed.match(/firebaseConfig\s*=\s*\{[\s\S]*?\};?/);
+  if (m) {
+    const start = m[0].indexOf('{');
+    const end = m[0].lastIndexOf('}');
+    objText = m[0].slice(start, end + 1);
+  } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    objText = trimmed;
+  } else {
+    throw new Error('Not JSON');
+  }
+
+  // Convert JS object literal → JSON (quote keys, remove trailing commas)
+  const jsonish = objText
+    .replace(/(\r\n|\r)/g, '\n')
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/([,{]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3');
+
+  const cfg = JSON.parse(jsonish);
+  return cfg;
 }
 
 function clearFirebaseConfig() {

@@ -111,3 +111,52 @@ td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
 
 .flex-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .mt-1 { margin-top: 1rem; }
+
+/* CONFIRM MODAL */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.modal-clickout {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  pointer-events: auto;
+}
+.modal-card {
+  position: relative;
+  max-width: 360px;
+  width: 90%;
+  background: var(--bg-card);
+  border-radius: 10px;
+  border: 1px solid var(--border-gold);
+  padding: 1rem 1.2rem;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+  z-index: 1;
+  pointer-events: auto;
+}
+.modal-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+.modal-body {
+  font-size: 0.85rem;
+  color: var(--text-main);
+  margin-bottom: 0.8rem;
+  line-height: 1.4;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}

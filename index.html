@@ -88,6 +88,22 @@
   </div>
 
   <div class="card">
+    <div class="card-title">Thêm / kiểm tra danh sách hàng loạt</div>
+    <textarea id="bulk-member-input" style="width:100%; min-height:100px; background:var(--bg-mid); border:1px solid var(--border-gold); color:var(--text-main); padding:0.6rem; border-radius:6px; font-family:monospace;" placeholder="Mỗi dòng một tên thành viên, ví dụ:
+TCG
+SocAres
+NDX"></textarea>
+    <div class="flex-row mt-1">
+      <button class="btn btn-gold" onclick="bulkAddMembers()"><i class="fa-solid fa-user-plus"></i> Thêm hàng loạt</button>
+      <button class="btn btn-red" onclick="bulkCheckMembers()"><i class="fa-solid fa-list-check"></i> Kiểm tra danh sách</button>
+    </div>
+    <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.4rem">
+      - Thêm hàng loạt: chỉ thêm những tên chưa tồn tại.<br>
+      - Kiểm tra danh sách: so sánh với danh sách hiện có, đề xuất thêm mới / loại bỏ từng người.
+    </div>
+  </div>
+
+  <div class="card">
     <div class="search-box">
       <input type="text" id="search-member" placeholder="Lọc danh sách..." onkeyup="renderMemberList()">
     </div>
@@ -149,6 +165,19 @@
 </div>
 
 <div id="toast">Thông báo</div>
+
+<div id="confirm-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-title" id="confirm-modal-title">Xác nhận</div>
+    <div class="modal-body" id="confirm-modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-gold" onclick="confirmModalApply()"><i class="fa-solid fa-check"></i> Thực hiện</button>
+      <button class="btn btn-red" onclick="confirmModalSkip()"><i class="fa-solid fa-xmark"></i> Bỏ qua</button>
+      <button class="btn btn-red" onclick="confirmModalCancelAll()"><i class="fa-solid fa-forward-step"></i> Bỏ qua tất cả</button>
+    </div>
+  </div>
+  <div class="modal-clickout" onclick="confirmModalCancelAll()"></div>
+</div>
 
 <!-- Firebase (optional, used for cloud sync) -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
