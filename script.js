@@ -3,7 +3,7 @@
 // ==========================================
 let state = {
   members: [], // {id, name, joinedAt, isAccountant?}
-  stats: {},   // {id: {kills, destroy, tower}}
+  stats: {},   // {id: {kills, destroy, tower, towerWeek?}}
   logs: [],    // {logId, memberId, type(kill/destroy/tower), amount, oldVal, time, extra?}
   towerBase: {}, // {id: {weekAnchorMs, baseTotal}}
   meta: {
@@ -27,7 +27,10 @@ function load() {
   }
   // Ensure stats object exists for backward compatibility
   state.members.forEach(m => {
-    if(!state.stats[m.id]) state.stats[m.id] = {kills:0, destroy:0, tower:0};
+    if(!state.stats[m.id]) state.stats[m.id] = {kills:0, destroy:0, tower:0, towerWeek:0};
+    if (typeof state.stats[m.id].towerWeek === 'undefined') {
+      state.stats[m.id].towerWeek = 0;
+    }
   });
   if (!state.meta) state.meta = { updatedAt: 0, weekAnchorMs: 0, weekLabel: "" };
   if (!state.towerBase) state.towerBase = {};
@@ -112,18 +115,8 @@ function updateWeekLabelView() {
 }
 
 function getTowerWeekFor(memberId) {
-  const anchor = state.meta?.weekAnchorMs || getWeekAnchorMs();
   const s = getStats(memberId);
-  const base = state.towerBase?.[memberId];
-  if (!base || base.weekAnchorMs !== anchor) {
-    // New member, or missing baseline → start counting from now / join time
-    if (!state.towerBase) state.towerBase = {};
-    state.towerBase[memberId] = { weekAnchorMs: anchor, baseTotal: s.tower || 0 };
-    bumpUpdatedAt();
-    saveAll();
-    return 0;
-  }
-  return Math.max(0, (s.tower || 0) - (base.baseTotal || 0));
+  return Math.max(0, s.towerWeek || 0);
 }
 
 // ==========================================
@@ -162,7 +155,7 @@ function addMember() {
   }
   const id = 'mb_' + Date.now();
   state.members.push({id, name, joinedAt: Date.now(), isAccountant: false});
-  state.stats[id] = {kills:0, destroy:0, tower:0};
+  state.stats[id] = {kills:0, destroy:0, tower:0, towerWeek:0};
   ensureWeek();
   state.towerBase[id] = { weekAnchorMs: state.meta.weekAnchorMs, baseTotal: 0 };
   logMemberChange('add', { memberId: id, name });
@@ -181,7 +174,7 @@ function addMemberWithName(rawName) {
   }
   const id = 'mb_' + Date.now() + Math.floor(Math.random()*1000);
   state.members.push({id, name, joinedAt: Date.now(), isAccountant: false});
-  state.stats[id] = {kills:0, destroy:0, tower:0};
+  state.stats[id] = {kills:0, destroy:0, tower:0, towerWeek:0};
   ensureWeek();
   state.towerBase[id] = { weekAnchorMs: state.meta.weekAnchorMs, baseTotal: 0 };
   logMemberChange('add', { memberId: id, name });
@@ -247,7 +240,11 @@ function renderMemberList() {
           const accountantOnly = state.members.some(x => x.isAccountant) ? '' : ' (chọn 1 người)';
           return `
             <tr>
-              <td><span class="member-name">${m.name}</span></td>
+              <td>
+                <span class="member-name" onclick="openTowerEntryFromMembers('${m.id}')" title="Nhấn để nhập tháp tuần">
+                  ${m.name}
+                </span>
+              </td>
               <td class="num">${(s.kills || 0).toLocaleString()}</td>
               <td class="num">${(s.destroy || 0).toLocaleString()}</td>
               <td class="num">${tw.toLocaleString()}</td>
@@ -277,27 +274,61 @@ function editMember(id) {
   const anchor = state.meta?.weekAnchorMs || getWeekAnchorMs();
   const curBase = (base && base.weekAnchorMs === anchor) ? (base.baseTotal || 0) : 0;
 
-  const newNameRaw = prompt('Nhập tên mới cho thành viên (để trống = giữ nguyên):', m.name);
-  if (newNameRaw === null) return;
-  const newName = newNameRaw.trim() || m.name;
+  const idEl = document.getElementById('edit-member-id');
+  const nameEl = document.getElementById('edit-member-name');
+  const killEl = document.getElementById('edit-member-kills');
+  const desEl = document.getElementById('edit-member-destroy');
+  const towEndEl = document.getElementById('edit-member-tower-end');
+  const towStartEl = document.getElementById('edit-member-tower-start');
+  const modal = document.getElementById('edit-member-modal');
+  if (!idEl || !nameEl || !killEl || !desEl || !towEndEl || !towStartEl || !modal) return;
+
+  idEl.value = id;
+  nameEl.value = m.name;
+  killEl.value = s.kills || 0;
+  desEl.value = s.destroy || 0;
+  towEndEl.value = s.tower || 0;
+  towStartEl.value = curBase || 0;
+
+  modal.style.display = 'flex';
+  nameEl.focus();
+}
+
+function closeEditMemberModal() {
+  const modal = document.getElementById('edit-member-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function applyEditMember() {
+  const idEl = document.getElementById('edit-member-id');
+  const nameEl = document.getElementById('edit-member-name');
+  const killEl = document.getElementById('edit-member-kills');
+  const desEl = document.getElementById('edit-member-destroy');
+  const towEndEl = document.getElementById('edit-member-tower-end');
+  const towStartEl = document.getElementById('edit-member-tower-start');
+  if (!idEl || !nameEl || !killEl || !desEl || !towEndEl || !towStartEl) return;
+
+  const id = idEl.value;
+  const m = state.members.find(x => x.id === id);
+  if (!m) { closeEditMemberModal(); return; }
+  const s = getStats(id);
+  const anchor = state.meta?.weekAnchorMs || getWeekAnchorMs();
+
+  const newName = (nameEl.value || '').trim() || m.name;
   if (state.members.some(x => x.id !== id && x.name.toLowerCase() === newName.toLowerCase())) {
     toast('Tên mới đã tồn tại, hãy chọn tên khác.');
     return;
   }
 
-  const killsRaw = prompt('Nhập TỔNG điểm Diệt địch (trong game). Để trống = giữ nguyên.', s.kills ?? 0);
-  if (killsRaw === null) return;
-  const destroyRaw = prompt('Nhập TỔNG điểm Phá thành (trong game). Để trống = giữ nguyên.', s.destroy ?? 0);
-  if (destroyRaw === null) return;
-  const towerEndRaw = prompt('Nhập TỔNG lượt tăng tốc tháp hiện tại (CUỐI TUẦN / trong game). Để trống = giữ nguyên.', s.tower ?? 0);
-  if (towerEndRaw === null) return;
-  const towerStartRaw = prompt('Nhập số trong game tại ĐẦU TUẦN cho tháp (để trống = 0).', curBase);
-  if (towerStartRaw === null) return;
+  const killsRaw = (killEl.value || '').trim();
+  const destroyRaw = (desEl.value || '').trim();
+  const towerEndRaw = (towEndEl.value || '').trim();
+  const towerStartRaw = (towStartEl.value || '').trim();
 
-  const newKills = killsRaw.trim() === '' ? s.kills : (parseInt(killsRaw, 10) || 0);
-  const newDestroy = destroyRaw.trim() === '' ? s.destroy : (parseInt(destroyRaw, 10) || 0);
-  const newTowerEnd = towerEndRaw.trim() === '' ? s.tower : (parseInt(towerEndRaw, 10) || 0);
-  const newTowerStart = towerStartRaw.trim() === '' ? 0 : (parseInt(towerStartRaw, 10) || 0);
+  const newKills = killsRaw === '' ? (s.kills || 0) : Math.max(0, parseInt(killsRaw, 10) || 0);
+  const newDestroy = destroyRaw === '' ? (s.destroy || 0) : Math.max(0, parseInt(destroyRaw, 10) || 0);
+  const newTowerEnd = towerEndRaw === '' ? (s.tower || 0) : Math.max(0, parseInt(towerEndRaw, 10) || 0);
+  const newTowerStart = towerStartRaw === '' ? 0 : Math.max(0, parseInt(towerStartRaw, 10) || 0);
 
   if (newTowerEnd < newTowerStart) {
     toast('Số CUỐI TUẦN phải lớn hơn hoặc bằng số ĐẦU TUẦN cho tháp.');
@@ -310,10 +341,13 @@ function editMember(id) {
     logMemberChange('rename', { memberId: id, oldName, newName });
   }
 
+  const weekGain = newTowerEnd - newTowerStart;
+
   state.stats[id] = {
     kills: newKills,
     destroy: newDestroy,
-    tower: newTowerEnd
+    tower: newTowerEnd,
+    towerWeek: Math.max(0, weekGain)
   };
   if (!state.towerBase) state.towerBase = {};
   state.towerBase[id] = { weekAnchorMs: anchor, baseTotal: newTowerStart };
@@ -323,6 +357,7 @@ function editMember(id) {
   renderMemberList();
   renderEntryList();
   renderBXH();
+  closeEditMemberModal();
   toast('Đã cập nhật thông tin thành viên.');
 }
 
@@ -566,13 +601,14 @@ function saveEntry() {
   
   // 2. Fix lỗi mất thông số: Đảm bảo dữ liệu gốc luôn có đủ 3 chỉ số
   if (!state.stats[activeMemberId]) {
-    state.stats[activeMemberId] = { kills: 0, destroy: 0, tower: 0 };
+    state.stats[activeMemberId] = { kills: 0, destroy: 0, tower: 0, towerWeek: 0 };
   }
   const s = state.stats[activeMemberId];
   // Chống lỗi "undefined" nếu lỡ thành viên cũ bị thiếu dữ liệu
   if (typeof s.kills === 'undefined' || isNaN(s.kills)) s.kills = 0;
   if (typeof s.destroy === 'undefined' || isNaN(s.destroy)) s.destroy = 0;
   if (typeof s.tower === 'undefined' || isNaN(s.tower)) s.tower = 0;
+  if (typeof s.towerWeek === 'undefined' || isNaN(s.towerWeek)) s.towerWeek = 0;
 
   // Lấy dữ liệu từ các ô nhập
   const inKill = parseInt(document.getElementById('inp-kill').value);
@@ -617,6 +653,7 @@ function saveEntry() {
     const weekGain = endVal - startVal;
     const old = s.tower;
     s.tower = endVal; // lưu tổng hiện tại (giống số trong game)
+    s.towerWeek = weekGain; // lưu lượt trong tuần để BXH dùng trực tiếp
     state.towerBase[activeMemberId] = { weekAnchorMs: anchor, baseTotal: startVal };
     logAction(activeMemberId, 'tower', weekGain, old, { start: startVal, end: endVal, gain: weekGain });
     changed = true;
@@ -867,7 +904,7 @@ function buildTable(list, valKey, suffix, opts) {
             <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.1rem;">
               Tổng diệt: <b>${(m.kills || 0).toLocaleString()}</b> • 
               Tổng phá: <b>${(m.destroy || 0).toLocaleString()}</b> • 
-              Tổng tháp: <b>${(m.tower || 0).toLocaleString()}</b>
+              Lượt tháp tuần: <b>${(m.towerWeek || 0).toLocaleString()}</b> (tổng trong game: <b>${(m.tower || 0).toLocaleString()}</b>)
             </div>
           </td>
           <td align="right" style="color:var(--text-main); white-space:nowrap;">
@@ -956,7 +993,7 @@ function renderBXH() {
 // ==========================================
 function resetWeek() {
   if(confirm('Hành động này sẽ đưa TOÀN BỘ điểm Diệt, Phá, Tháp của TẤT CẢ thành viên về 0. Bạn có chắc không?')) {
-    state.members.forEach(m => { state.stats[m.id] = {kills:0, destroy:0, tower:0}; });
+    state.members.forEach(m => { state.stats[m.id] = {kills:0, destroy:0, tower:0, towerWeek:0}; });
     state.logs = []; // Xoá luôn lịch sử
     bumpUpdatedAt();
     saveAll();
@@ -997,6 +1034,16 @@ function copyBXH() {
   r.r4_des.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
 
   navigator.clipboard.writeText(txt).then(() => toast('Đã copy BXH.'));
+}
+
+function openTowerEntryFromMembers(id) {
+  showPage('enter');
+  selectForEntry(id);
+  const inpEnd = document.getElementById('inp-tower-end');
+  if (inpEnd) {
+    inpEnd.focus();
+    inpEnd.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 }
 
 function newWeekSummary() {
