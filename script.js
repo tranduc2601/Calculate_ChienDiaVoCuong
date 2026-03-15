@@ -4,7 +4,7 @@
 let state = {
   members: [], // {id, name, joinedAt, isAccountant?}
   stats: {},   // {id: {kills, destroy, tower}}
-  logs: [],    // {logId, memberId, type(kill/destroy/tower), amount, oldVal, time}
+  logs: [],    // {logId, memberId, type(kill/destroy/tower), amount, oldVal, time, extra?}
   towerBase: {}, // {id: {weekAnchorMs, baseTotal}}
   meta: {
     updatedAt: 0,
@@ -12,7 +12,8 @@ let state = {
     weekLabel: "",
     manualRange: null // {startMs, endMs}
   },
-  memberLogs: [] // {id, kind, payload, time}
+  memberLogs: [], // {id, kind, payload, time}
+  weekHistory: [] // {id, weekAnchorMs, label, createdAt, text}
 };
 
 const STORAGE_KEY = 'minhchu_v4';
@@ -31,6 +32,7 @@ function load() {
   if (!state.meta) state.meta = { updatedAt: 0, weekAnchorMs: 0, weekLabel: "" };
   if (!state.towerBase) state.towerBase = {};
   if (!state.memberLogs) state.memberLogs = [];
+  if (!state.weekHistory) state.weekHistory = [];
   // Chỉ cho phép 1 kế toán: giữ người đầu tiên được đánh dấu
   const accountants = state.members.filter(m => m.isAccountant);
   if (accountants.length > 1) {
@@ -256,7 +258,7 @@ function renderMemberList() {
                 </label>
               </td>
               <td class="col-actions">
-                <button class="btn btn-sm" onclick="renameMember('${m.id}')" title="Đổi tên"><i class="fa-solid fa-pen"></i></button>
+                <button class="btn btn-sm" onclick="editMember('${m.id}')" title="Chỉnh sửa thông số"><i class="fa-solid fa-pen"></i></button>
                 <button class="btn btn-sm btn-red" onclick="deleteMember('${m.id}')" title="Xóa">Xóa</button>
               </td>
             </tr>
@@ -267,26 +269,61 @@ function renderMemberList() {
   `;
 }
 
-function renameMember(id) {
+function editMember(id) {
   const m = state.members.find(x => x.id === id);
   if (!m) return;
-  const newNameRaw = prompt('Nhập tên mới cho thành viên:', m.name);
+  const s = getStats(id);
+  const base = state.towerBase?.[id];
+  const anchor = state.meta?.weekAnchorMs || getWeekAnchorMs();
+  const curBase = (base && base.weekAnchorMs === anchor) ? (base.baseTotal || 0) : 0;
+
+  const newNameRaw = prompt('Nhập tên mới cho thành viên (để trống = giữ nguyên):', m.name);
   if (newNameRaw === null) return;
-  const newName = newNameRaw.trim();
-  if (!newName || newName === m.name) return;
+  const newName = newNameRaw.trim() || m.name;
   if (state.members.some(x => x.id !== id && x.name.toLowerCase() === newName.toLowerCase())) {
     toast('Tên mới đã tồn tại, hãy chọn tên khác.');
     return;
   }
+
+  const killsRaw = prompt('Nhập TỔNG điểm Diệt địch (trong game). Để trống = giữ nguyên.', s.kills ?? 0);
+  if (killsRaw === null) return;
+  const destroyRaw = prompt('Nhập TỔNG điểm Phá thành (trong game). Để trống = giữ nguyên.', s.destroy ?? 0);
+  if (destroyRaw === null) return;
+  const towerEndRaw = prompt('Nhập TỔNG lượt tăng tốc tháp hiện tại (CUỐI TUẦN / trong game). Để trống = giữ nguyên.', s.tower ?? 0);
+  if (towerEndRaw === null) return;
+  const towerStartRaw = prompt('Nhập số trong game tại ĐẦU TUẦN cho tháp (để trống = 0).', curBase);
+  if (towerStartRaw === null) return;
+
+  const newKills = killsRaw.trim() === '' ? s.kills : (parseInt(killsRaw, 10) || 0);
+  const newDestroy = destroyRaw.trim() === '' ? s.destroy : (parseInt(destroyRaw, 10) || 0);
+  const newTowerEnd = towerEndRaw.trim() === '' ? s.tower : (parseInt(towerEndRaw, 10) || 0);
+  const newTowerStart = towerStartRaw.trim() === '' ? 0 : (parseInt(towerStartRaw, 10) || 0);
+
+  if (newTowerEnd < newTowerStart) {
+    toast('Số CUỐI TUẦN phải lớn hơn hoặc bằng số ĐẦU TUẦN cho tháp.');
+    return;
+  }
+
   const oldName = m.name;
-  m.name = newName;
-  logMemberChange('rename', { memberId: id, oldName, newName });
+  if (newName !== oldName) {
+    m.name = newName;
+    logMemberChange('rename', { memberId: id, oldName, newName });
+  }
+
+  state.stats[id] = {
+    kills: newKills,
+    destroy: newDestroy,
+    tower: newTowerEnd
+  };
+  if (!state.towerBase) state.towerBase = {};
+  state.towerBase[id] = { weekAnchorMs: anchor, baseTotal: newTowerStart };
+
   bumpUpdatedAt();
   saveAll();
   renderMemberList();
   renderEntryList();
   renderBXH();
-  toast('Đã đổi tên.');
+  toast('Đã cập nhật thông tin thành viên.');
 }
 
 function setAccountant(id) {
@@ -499,10 +536,11 @@ function closeEntryForm() {
   renderEntryList();
 }
 
-function logAction(memberId, type, amount, oldVal) {
+function logAction(memberId, type, amount, oldVal, extra) {
   state.logs.unshift({
     logId: 'log_' + Date.now() + Math.random(),
     memberId, type, amount, oldVal,
+    extra: extra || null,
     time: new Date().getTime()
   });
   if(state.logs.length > 50) state.logs.pop(); // Keep only last 50
@@ -539,8 +577,10 @@ function saveEntry() {
   // Lấy dữ liệu từ các ô nhập
   const inKill = parseInt(document.getElementById('inp-kill').value);
   const inDes = parseInt(document.getElementById('inp-destroy').value);
-  const inTowStart = parseInt(document.getElementById('inp-tower-start')?.value);
-  const inTowEnd = parseInt(document.getElementById('inp-tower-end')?.value);
+  const rawTowStart = document.getElementById('inp-tower-start')?.value;
+  const rawTowEnd = document.getElementById('inp-tower-end')?.value;
+  const inTowStart = parseInt(rawTowStart);
+  const inTowEnd = parseInt(rawTowEnd);
   
   let changed = false;
 
@@ -560,24 +600,25 @@ function saveEntry() {
     changed = true;
   }
   
-  // Xử lý Tháp: nhập đầu tuần & cuối tuần rồi tự tính chênh lệch
-  if (!isNaN(inTowStart) || !isNaN(inTowEnd)) {
-    if (isNaN(inTowStart) || isNaN(inTowEnd)) {
-      toast('Vui lòng nhập đủ cả ĐẦU TUẦN và CUỐI TUẦN cho tháp.');
-      return;
-    }
-    if (inTowEnd < inTowStart) {
-      toast('Số cuối tuần phải lớn hơn hoặc bằng số đầu tuần.');
-      return;
-    }
-    const weekGain = inTowEnd - inTowStart;
-    const old = s.tower;
-    s.tower = inTowEnd; // lưu tổng hiện tại
-    // chỉnh lại baseline cho tuần hiện tại bằng giá trị đầu tuần
+  // Xử lý Tháp: cho phép bỏ trống ĐẦU / CUỐI (mặc định 0 hoặc dùng mốc tuần)
+  if ((rawTowStart && !isNaN(inTowStart)) || (rawTowEnd && !isNaN(inTowEnd))) {
     const anchor = state.meta?.weekAnchorMs || getWeekAnchorMs();
     if (!state.towerBase) state.towerBase = {};
-    state.towerBase[activeMemberId] = { weekAnchorMs: anchor, baseTotal: inTowStart };
-    logAction(activeMemberId, 'tower', weekGain, old);
+    const baseNow = state.towerBase[activeMemberId];
+    const defaultStart = (baseNow && baseNow.weekAnchorMs === anchor) ? (baseNow.baseTotal || 0) : 0;
+    const startVal = !rawTowStart || isNaN(inTowStart) ? defaultStart : inTowStart;
+    const endVal = !rawTowEnd || isNaN(inTowEnd) ? 0 : inTowEnd;
+
+    if (endVal < startVal) {
+      toast('Số CUỐI TUẦN phải lớn hơn hoặc bằng số ĐẦU TUẦN cho tháp.');
+      return;
+    }
+
+    const weekGain = endVal - startVal;
+    const old = s.tower;
+    s.tower = endVal; // lưu tổng hiện tại (giống số trong game)
+    state.towerBase[activeMemberId] = { weekAnchorMs: anchor, baseTotal: startVal };
+    logAction(activeMemberId, 'tower', weekGain, old, { start: startVal, end: endVal, gain: weekGain });
     changed = true;
   }
 
@@ -632,9 +673,20 @@ function renderHistory() {
         ${statLogs.map(log => {
           const mName = state.members.find(m => m.id === log.memberId)?.name || 'Đã xóa';
           const time = new Date(log.time).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
-          const actionText = log.type === 'tower' 
-            ? `Cập nhật thành <b>${log.amount}</b>` 
-            : `Cộng thêm <b>${log.amount}</b>`;
+          let actionText = '';
+          if (log.type === 'tower') {
+            const ex = log.extra || {};
+            const start = typeof ex.start === 'number' ? ex.start : null;
+            const end = typeof ex.end === 'number' ? ex.end : null;
+            const gain = typeof ex.gain === 'number' ? ex.gain : log.amount;
+            if (start !== null && end !== null) {
+              actionText = `Tháp canh: Đầu tuần <b>${start}</b> ➜ Cuối tuần <b>${end}</b> (tăng <b>${gain}</b> lượt)`;
+            } else {
+              actionText = `Tháp canh: tăng <b>${gain}</b> lượt`;
+            }
+          } else {
+            actionText = `Cộng thêm <b>${log.amount}</b>`;
+          }
 
           return `
             <tr>
@@ -684,7 +736,31 @@ function renderHistory() {
     </table>
   ` : '';
 
-  container.innerHTML = statTable + memberTable;
+  const weekHistory = (state.weekHistory || []);
+  const weekTable = weekHistory.length ? `
+    <h4 style="font-family:'Cinzel',serif; font-size:0.9rem; color:var(--gold); margin:1rem 0 0.4rem;">Lịch sử tuần (tháp canh)</h4>
+    <table>
+      <thead><tr><th>Tuần</th><th>Nội dung</th><th></th></tr></thead>
+      <tbody>
+        ${weekHistory.map(w => {
+          const time = new Date(w.createdAt || w.weekAnchorMs || Date.now()).toLocaleString('vi-VN', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+          return `
+            <tr>
+              <td style="font-size:0.8rem; color:var(--text-dim); white-space:nowrap;">
+                ${w.label || ''}<br><span style="font-size:0.7rem;">Lưu lúc: ${time}</span>
+              </td>
+              <td style="font-size:0.8rem; white-space:pre-line; max-width:260px;">${(w.text || '').replace(/\n/g, '<br>')}</td>
+              <td style="text-align:right;">
+                <button class="btn btn-sm" onclick="navigator.clipboard.writeText('${(w.text || '').replace(/'/g, "\\'").replace(/\n/g, '\\n')}'); toast('Đã copy lịch sử tuần.');">Copy</button>
+              </td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  ` : '';
+
+  container.innerHTML = statTable + memberTable + weekTable;
 }
 
 function undoLog(logId) {
@@ -921,6 +997,52 @@ function copyBXH() {
   r.r4_des.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
 
   navigator.clipboard.writeText(txt).then(() => toast('Đã copy BXH.'));
+}
+
+function newWeekSummary() {
+  ensureWeek();
+  const anchor = state.meta?.weekAnchorMs || getWeekAnchorMs();
+  const label = state.meta?.weekLabel || formatWeekLabel(anchor);
+
+  let lines = [];
+  lines.push(`TỔNG KẾT THÁP CANH TUẦN ${label}`);
+  lines.push('');
+
+  state.members.forEach(m => {
+    const s = getStats(m.id);
+    const base = state.towerBase?.[m.id];
+    const start = (base && base.weekAnchorMs === anchor) ? (base.baseTotal || 0) : 0;
+    const end = s.tower || 0;
+    const gain = Math.max(0, end - start);
+    if (start === 0 && end === 0 && gain === 0) return;
+    lines.push(`${m.name}: Đầu tuần ${start}, Cuối tuần ${end}, Trong tuần ${gain}`);
+  });
+
+  if (lines.length <= 2) {
+    toast('Chưa có dữ liệu tháp để tổng kết tuần này.');
+    return;
+  }
+
+  const text = lines.join('\n');
+
+  if (!state.weekHistory) state.weekHistory = [];
+  state.weekHistory.unshift({
+    id: 'wh_' + Date.now() + Math.random(),
+    weekAnchorMs: anchor,
+    label,
+    createdAt: Date.now(),
+    text
+  });
+  if (state.weekHistory.length > 50) state.weekHistory.pop();
+
+  bumpUpdatedAt();
+  saveAll();
+
+  navigator.clipboard.writeText(text).then(() => {
+    toast('Đã lưu và copy tổng kết tuần.');
+  }).catch(() => {
+    toast('Đã lưu tổng kết tuần (copy clipboard thất bại).');
+  });
 }
 
 // ==========================================
