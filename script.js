@@ -31,6 +31,12 @@ function load() {
   if (!state.meta) state.meta = { updatedAt: 0, weekAnchorMs: 0, weekLabel: "" };
   if (!state.towerBase) state.towerBase = {};
   if (!state.memberLogs) state.memberLogs = [];
+  // Chỉ cho phép 1 kế toán: giữ người đầu tiên được đánh dấu
+  const accountants = state.members.filter(m => m.isAccountant);
+  if (accountants.length > 1) {
+    state.members.forEach(m => { m.isAccountant = false; });
+    state.members.find(m => m.id === accountants[0].id).isAccountant = true;
+  }
 }
 
 function getStats(id) { return state.stats[id] || {kills:0, destroy:0, tower:0}; }
@@ -123,15 +129,18 @@ function getTowerWeekFor(memberId) {
 // ==========================================
 function showPage(pageId) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + pageId).classList.add('active');
-  const evt = (typeof window !== 'undefined') ? window.event : null;
-  if (evt && evt.currentTarget) evt.currentTarget.classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.remove('active');
+    if ((b.getAttribute('onclick') || '').includes("showPage('" + pageId + "')")) b.classList.add('active');
+  });
+  const pageEl = document.getElementById('page-' + pageId);
+  if (pageEl) pageEl.classList.add('active');
 
   if(pageId === 'members') renderMemberList();
   if(pageId === 'enter') renderEntryList();
   if(pageId === 'bxh') renderBXH();
   if(pageId === 'history') renderHistory();
+  if(pageId === 'settings') checkSettingsConnectPrompt();
 }
 
 function toast(msg) {
@@ -204,29 +213,58 @@ function deleteMemberInternal(id) {
 }
 
 function renderMemberList() {
-  const query = document.getElementById('search-member').value.toLowerCase();
-  const list = state.members.filter(m => m.name.toLowerCase().includes(query));
-  
+  const query = (document.getElementById('search-member')?.value || '').toLowerCase();
+  const sortBy = document.getElementById('member-sort-by')?.value || 'name';
+  let list = state.members.filter(m => m.name.toLowerCase().includes(query));
+
+  const towerWeek = (id) => getTowerWeekFor(id);
+  if (sortBy === 'kills') list = [...list].sort((a, b) => (getStats(b.id).kills || 0) - (getStats(a.id).kills || 0));
+  else if (sortBy === 'destroy') list = [...list].sort((a, b) => (getStats(b.id).destroy || 0) - (getStats(a.id).destroy || 0));
+  else if (sortBy === 'tower') list = [...list].sort((a, b) => towerWeek(b.id) - towerWeek(a.id));
+  else list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+
   const container = document.getElementById('full-member-list');
-  if(list.length === 0) { container.innerHTML = '<div style="padding:1rem; text-align:center">Không tìm thấy ai.</div>'; return; }
-  
-  container.innerHTML = list.map(m => {
-    const s = getStats(m.id);
-    const flag = m.isAccountant ? '<span style="font-size:0.75rem; color:var(--gold-light); margin-left:0.4rem; border:1px solid var(--border-gold); padding:0.1rem 0.4rem; border-radius:999px;"><i class="fa-solid fa-coins"></i> Kế toán</span>' : '';
-    return `
-      <div class="list-item">
-        <div class="member-info">
-          <span class="member-name">${m.name}${flag}</span>
-          <span class="member-stats"><i class="fa-solid fa-skull"></i> Diệt: ${s.kills.toLocaleString()} | <i class="fa-solid fa-chess-rook"></i> Phá: ${s.destroy.toLocaleString()} | <i class="fa-solid fa-tower-observation"></i> Tháp: ${s.tower.toLocaleString()}</span>
-        </div>
-        <div class="flex-row" style="justify-content:flex-end;">
-          <button class="btn btn-sm" onclick="toggleAccountant('${m.id}')"><i class="fa-solid fa-coins"></i></button>
-          <button class="btn btn-sm" onclick="renameMember('${m.id}')"><i class="fa-solid fa-pen"></i></button>
-          <button class="btn btn-sm btn-red" onclick="deleteMember('${m.id}')">Xóa</button>
-        </div>
-      </div>
-    `;
-  }).join('');
+  if (list.length === 0) { container.innerHTML = '<div class="members-empty">Không tìm thấy ai.</div>'; return; }
+
+  container.innerHTML = `
+    <table class="members-table">
+      <thead>
+        <tr>
+          <th>Tên</th>
+          <th class="num"><i class="fa-solid fa-skull" title="Diệt lính"></i></th>
+          <th class="num"><i class="fa-solid fa-chess-rook" title="Phá thành"></i></th>
+          <th class="num"><i class="fa-solid fa-tower-observation" title="Tháp tuần"></i></th>
+          <th class="col-ke-toan">Kế toán</th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${list.map(m => {
+          const s = getStats(m.id);
+          const tw = towerWeek(m.id);
+          const accountantOnly = state.members.some(x => x.isAccountant) ? '' : ' (chọn 1 người)';
+          return `
+            <tr>
+              <td><span class="member-name">${m.name}</span></td>
+              <td class="num">${(s.kills || 0).toLocaleString()}</td>
+              <td class="num">${(s.destroy || 0).toLocaleString()}</td>
+              <td class="num">${tw.toLocaleString()}</td>
+              <td class="col-ke-toan">
+                <label class="accountant-radio">
+                  <input type="radio" name="accountant" ${m.isAccountant ? 'checked' : ''} onchange="setAccountant('${m.id}')" title="Chọn làm kế toán${accountantOnly}">
+                  <span class="radio-label"><i class="fa-solid fa-coins"></i></span>
+                </label>
+              </td>
+              <td class="col-actions">
+                <button class="btn btn-sm" onclick="renameMember('${m.id}')" title="Đổi tên"><i class="fa-solid fa-pen"></i></button>
+                <button class="btn btn-sm btn-red" onclick="deleteMember('${m.id}')" title="Xóa">Xóa</button>
+              </td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
 }
 
 function renameMember(id) {
@@ -251,11 +289,28 @@ function renameMember(id) {
   toast('Đã đổi tên.');
 }
 
+function setAccountant(id) {
+  const m = state.members.find(x => x.id === id);
+  if (!m) return;
+  state.members.forEach(mb => { mb.isAccountant = (mb.id === id); });
+  logMemberChange('accountant', { memberId: id, name: m.name, value: true });
+  bumpUpdatedAt();
+  saveAll();
+  renderMemberList();
+  renderBXH();
+  toast('Đã đặt ' + m.name + ' làm kế toán.');
+}
+
 function toggleAccountant(id) {
   const m = state.members.find(x => x.id === id);
   if (!m) return;
-  m.isAccountant = !m.isAccountant;
-  logMemberChange('accountant', { memberId: id, name: m.name, value: m.isAccountant });
+  if (m.isAccountant) {
+    m.isAccountant = false;
+    logMemberChange('accountant', { memberId: id, name: m.name, value: false });
+  } else {
+    setAccountant(id);
+    return;
+  }
   bumpUpdatedAt();
   saveAll();
   renderMemberList();
@@ -732,12 +787,17 @@ function buildTable(list, valKey, suffix) {
 function renderBXH() {
   ensureWeek();
   const r = computeBXH();
+  const accountantMember = state.members.find(m => m.isAccountant);
+  const accountantLine = accountantMember
+    ? `<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">+ 1 Slot Kế Toán: <a href="#" onclick="showPage('members'); return false;" class="link-accountant">${accountantMember.name}</a></div>`
+    : '<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">+ 1 Slot Kế Toán do Minh Chủ quyết định — <a href="#" onclick="showPage(\'members\'); return false;" class="link-accountant">Chọn tại trang Thành viên</a></div>';
+
   document.getElementById('bxh-content').innerHTML = `
     <div class="card">
       <div class="card-title"><span class="badge b-r1">RƯƠNG 1 (x10)</span></div>
       <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP 9 DIỆT ĐỊCH</div>
       ${buildTable(r.r1_kill, 'kills', 'điểm')}
-      <div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">+ 1 Slot Kế Toán do Minh Chủ quyết định</div>
+      ${accountantLine}
     </div>
 
     <div class="card">
@@ -914,8 +974,8 @@ function clearFirebaseConfig() {
 
 async function connectCloud() {
   const cfg = getCloudCfg();
-  if (!cfg) { toast('Bạn cần dán Firebase config trước.'); return; }
-  if (!window.firebase?.initializeApp) { toast('Thiếu Firebase SDK (không load được).'); return; }
+  if (!cfg) { toast('Bạn cần dán Firebase config trước.'); return false; }
+  if (!window.firebase?.initializeApp) { toast('Thiếu Firebase SDK (không load được).'); return false; }
 
   try {
     if (!cloud.app) cloud.app = firebase.initializeApp(cfg);
@@ -925,13 +985,16 @@ async function connectCloud() {
     cloud.enabled = true;
     setCloudStatus('Đã kết nối');
     startCloudListener();
-    // Push local immediately if remote empty/older
     scheduleCloudWrite(true);
+    stopConnectPromptLoop();
+    hideConnectPromptModal();
     toast('Cloud đã sẵn sàng.');
+    return true;
   } catch (e) {
     cloud.enabled = false;
     setCloudStatus('Lỗi kết nối');
     toast('Không kết nối được Cloud. Kiểm tra config/rules Firebase.');
+    return false;
   }
 }
 
@@ -940,7 +1003,55 @@ function disconnectCloud() {
   cloud.unsub = null;
   cloud.enabled = false;
   setCloudStatus('Đã ngắt');
+  stopConnectPromptLoop();
   toast('Đã ngắt Cloud.');
+}
+
+let connectPromptTimer = null;
+let connectPromptTimeout = null;
+function showConnectPromptModal() {
+  const modal = document.getElementById('connect-prompt-modal');
+  if (modal) modal.style.display = 'flex';
+}
+function hideConnectPromptModal() {
+  const modal = document.getElementById('connect-prompt-modal');
+  if (modal) modal.style.display = 'none';
+}
+function connectPromptConnect() {
+  hideConnectPromptModal();
+  connectCloud();
+}
+function connectPromptLater() {
+  hideConnectPromptModal();
+  if (connectPromptTimeout) clearTimeout(connectPromptTimeout);
+  connectPromptTimeout = setTimeout(() => {
+    connectPromptTimeout = null;
+    if (document.getElementById('page-settings')?.classList.contains('active') && !cloud.enabled && getCloudCfg()) {
+      showConnectPromptModal();
+      startConnectPromptLoop();
+    }
+  }, 8000);
+}
+function startConnectPromptLoop() {
+  stopConnectPromptLoop();
+  connectPromptTimer = setInterval(() => {
+    if (!document.getElementById('page-settings')?.classList.contains('active') || cloud.enabled) {
+      stopConnectPromptLoop();
+      return;
+    }
+    if (!getCloudCfg()) return;
+    showConnectPromptModal();
+  }, 15000);
+}
+function stopConnectPromptLoop() {
+  if (connectPromptTimer) { clearInterval(connectPromptTimer); connectPromptTimer = null; }
+  if (connectPromptTimeout) { clearTimeout(connectPromptTimeout); connectPromptTimeout = null; }
+}
+function checkSettingsConnectPrompt() {
+  if (cloud.enabled) return;
+  if (!getCloudCfg()) return;
+  showConnectPromptModal();
+  startConnectPromptLoop();
 }
 
 function cloudDocRef() {
@@ -1058,6 +1169,11 @@ try {
   const el = document.getElementById('inp-fb-config');
   if (cfg && el) el.value = JSON.stringify(cfg);
 } catch(e) {}
+
+// Tự kết nối Cloud khi đã có config
+setTimeout(() => {
+  if (getCloudCfg() && !cloud.enabled) connectCloud();
+}, 500);
 
 // Khôi phục khung thời gian thủ công (nếu có)
 window.addEventListener('load', () => {
