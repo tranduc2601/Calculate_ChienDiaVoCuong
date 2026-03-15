@@ -274,6 +274,23 @@ td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
 }
 .link-accountant:hover { text-decoration: underline; }
 
+/* BXH: đánh dấu kế toán trong bảng */
+.badge-accountant {
+  display: inline-block;
+  font-size: 0.7rem;
+  color: var(--gold-light);
+  background: rgba(201, 168, 76, 0.2);
+  border: 1px solid var(--border-gold);
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  margin-left: 0.4rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-accountant i { margin-right: 0.2rem; }
+tr.row-accountant { background: rgba(201, 168, 76, 0.12); }
+tr.row-accountant:hover { background: rgba(201, 168, 76, 0.18); }
+
 @media (max-width: 640px) {
   .members-layout { flex-direction: column; }
   .members-sidebar { flex: none; width: 100%; min-width: 0; }

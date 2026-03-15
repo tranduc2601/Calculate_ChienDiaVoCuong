@@ -732,8 +732,8 @@ function computeBXH() {
   // Helper để lọc ra những người chưa nhận rương
   const exclude = (list, excludeIds) => list.filter(m => !excludeIds.has(m.id));
 
-  // --- RƯƠNG 1 ---
-  const r1_kill = byKill.slice(0, 9);
+  // --- RƯƠNG 1 --- (Top 10 diệt địch; kế toán đánh dấu trong bảng)
+  const r1_kill = byKill.slice(0, 10);
   const set_r1 = new Set(r1_kill.map(m => m.id));
 
   // --- RƯƠNG 2 ---
@@ -760,15 +760,20 @@ function computeBXH() {
   return { r1_kill, r2_kill, r2_tower, r3_des, r3_tower, r4_tow, r4_kill, r4_des };
 }
 
-function buildTable(list, valKey, suffix) {
+function buildTable(list, valKey, suffix, opts) {
+  opts = opts || {};
   if(list.length === 0) return '<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem">Chưa có dữ liệu</div>';
   return `
     <table>
-      ${list.map((m,i) => `
-        <tr>
+      ${list.map((m,i) => {
+        const accountantBadge = (opts.showAccountant && m.isAccountant)
+          ? ' <span class="badge-accountant" title="Slot Kế Toán"><i class="fa-solid fa-coins"></i> Kế toán</span>'
+          : '';
+        return `
+        <tr class="${m.isAccountant && opts.showAccountant ? 'row-accountant' : ''}">
           <td width="30"><span class="rank-num ${i<3?'rank-'+(i+1):''}">${i+1}</span></td>
           <td>
-            <div class="member-name">${m.name}</div>
+            <div class="member-name">${m.name}${accountantBadge}</div>
             <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.1rem;">
               Tổng diệt: <b>${(m.kills || 0).toLocaleString()}</b> • 
               Tổng phá: <b>${(m.destroy || 0).toLocaleString()}</b> • 
@@ -779,7 +784,8 @@ function buildTable(list, valKey, suffix) {
             ${m[valKey].toLocaleString()} ${suffix}
           </td>
         </tr>
-      `).join('')}
+      `;
+      }).join('')}
     </table>
   `;
 }
@@ -789,14 +795,14 @@ function renderBXH() {
   const r = computeBXH();
   const accountantMember = state.members.find(m => m.isAccountant);
   const accountantLine = accountantMember
-    ? `<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">+ 1 Slot Kế Toán: <a href="#" onclick="showPage('members'); return false;" class="link-accountant">${accountantMember.name}</a></div>`
-    : '<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">+ 1 Slot Kế Toán do Minh Chủ quyết định — <a href="#" onclick="showPage(\'members\'); return false;" class="link-accountant">Chọn tại trang Thành viên</a></div>';
+    ? `<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">1 slot Kế Toán (đánh dấu trong bảng trên): <a href="#" onclick="showPage('members'); return false;" class="link-accountant">${accountantMember.name}</a></div>`
+    : '<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">1 slot Kế Toán do Minh Chủ quyết định — <a href="#" onclick="showPage(\'members\'); return false;" class="link-accountant">Chọn tại trang Thành viên</a> (sẽ hiện đánh dấu trong Top 10)</div>';
 
   document.getElementById('bxh-content').innerHTML = `
     <div class="card">
       <div class="card-title"><span class="badge b-r1">RƯƠNG 1 (x10)</span></div>
-      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP 9 DIỆT ĐỊCH</div>
-      ${buildTable(r.r1_kill, 'kills', 'điểm')}
+      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP 10 DIỆT ĐỊCH</div>
+      ${buildTable(r.r1_kill, 'kills', 'điểm', { showAccountant: true })}
       ${accountantLine}
     </div>
 
@@ -846,8 +852,8 @@ function copyBXH() {
   const r = computeBXH();
   let txt = `TỔNG KẾT RƯƠNG LIÊN MINH\n\n`;
   
-  txt += `RƯƠNG 1 (Top 9 Diệt):\n`;
-  r.r1_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
+  txt += `RƯƠNG 1 (Top 10 Diệt):\n`;
+  r.r1_kill.forEach((m,i)=> txt += `${i+1}. ${m.name}${m.isAccountant ? ' [Kế toán]' : ''} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
   
   txt += `\nRƯƠNG 2:\n[Diệt]\n`;
   r.r2_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
