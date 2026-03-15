@@ -732,9 +732,23 @@ function computeBXH() {
   // Helper để lọc ra những người chưa nhận rương
   const exclude = (list, excludeIds) => list.filter(m => !excludeIds.has(m.id));
 
-  // --- RƯƠNG 1 --- (Top 10 diệt địch; kế toán đánh dấu trong bảng)
-  const r1_kill = byKill.slice(0, 10);
-  const set_r1 = new Set(r1_kill.map(m => m.id));
+  // --- RƯƠNG 1 ---
+  // Nếu có Kế toán: ghim Kế toán + Top 9 diệt địch (không tính Kế toán)
+  // Nếu không có Kế toán: Top 10 diệt địch
+  const accountant = state.members.find(m => m.isAccountant);
+  let r1_accountant = null;
+  let r1_kill = [];
+  if (accountant) {
+    r1_accountant = data.find(d => d.id === accountant.id) || null;
+    const withoutAcc = byKill.filter(m => m.id !== accountant.id);
+    r1_kill = withoutAcc.slice(0, 9);
+  } else {
+    r1_kill = byKill.slice(0, 10);
+  }
+  const set_r1 = new Set([
+    ...r1_kill.map(m => m.id),
+    ...(r1_accountant ? [r1_accountant.id] : [])
+  ]);
 
   // --- RƯƠNG 2 ---
   const r2_kill = exclude(byKill, set_r1).slice(0, 5);
@@ -757,7 +771,7 @@ function computeBXH() {
   const set_r4_kill = new Set(r4_kill.map(m=>m.id));
   const r4_des = exclude(byDes, new Set([...all_r123, ...set_r4_tow, ...set_r4_kill])).slice(0, 5);
 
-  return { r1_kill, r2_kill, r2_tower, r3_des, r3_tower, r4_tow, r4_kill, r4_des };
+  return { r1_accountant, r1_kill, r2_kill, r2_tower, r3_des, r3_tower, r4_tow, r4_kill, r4_des };
 }
 
 function buildTable(list, valKey, suffix, opts) {
@@ -794,15 +808,42 @@ function renderBXH() {
   ensureWeek();
   const r = computeBXH();
   const accountantMember = state.members.find(m => m.isAccountant);
+  const hasAccountant = !!accountantMember;
+  const accountantRow = r.r1_accountant ? `
+    <tr class="row-accountant">
+      <td width="30"><span class="rank-num rank-kt" title="Kế Toán">K</span></td>
+      <td>
+        <div class="member-name">${r.r1_accountant.name}
+          <span class="badge-accountant" title="Slot Kế Toán"><i class="fa-solid fa-coins"></i> Kế toán</span>
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.1rem;">
+          Tổng diệt: <b>${(r.r1_accountant.kills || 0).toLocaleString()}</b> • 
+          Tổng phá: <b>${(r.r1_accountant.destroy || 0).toLocaleString()}</b> • 
+          Tổng tháp: <b>${(r.r1_accountant.tower || 0).toLocaleString()}</b>
+        </div>
+      </td>
+      <td align="right" style="color:var(--text-main); white-space:nowrap;">
+        ${(r.r1_accountant.kills || 0).toLocaleString()} điểm
+      </td>
+    </tr>
+  ` : '';
+
   const accountantLine = accountantMember
-    ? `<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">1 slot Kế Toán (đánh dấu trong bảng trên): <a href="#" onclick="showPage('members'); return false;" class="link-accountant">${accountantMember.name}</a></div>`
-    : '<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">1 slot Kế Toán do Minh Chủ quyết định — <a href="#" onclick="showPage(\'members\'); return false;" class="link-accountant">Chọn tại trang Thành viên</a> (sẽ hiện đánh dấu trong Top 10)</div>';
+    ? `<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">Kế toán đã chọn: <a href="#" onclick="showPage('members'); return false;" class="link-accountant">${accountantMember.name}</a> (ghim cố định trong Rương 1)</div>`
+    : '<div style="font-size:0.8rem; color:var(--text-dim); padding:0.5rem; border-top:1px solid var(--border)">Chưa chọn kế toán — <a href="#" onclick="showPage(\'members\'); return false;" class="link-accountant">Chọn tại trang Thành viên</a> (sẽ được ghim ở đầu Rương 1)</div>';
 
   document.getElementById('bxh-content').innerHTML = `
     <div class="card">
       <div class="card-title"><span class="badge b-r1">RƯƠNG 1 (x10)</span></div>
-      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP 10 DIỆT ĐỊCH</div>
-      ${buildTable(r.r1_kill, 'kills', 'điểm', { showAccountant: true })}
+      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">
+        ${hasAccountant ? 'Kế toán (ghim cố định) + Top 9 diệt địch' : 'Top 10 diệt địch'}
+      </div>
+      <table>
+        <tbody>
+          ${accountantRow}
+        </tbody>
+      </table>
+      ${buildTable(r.r1_kill, 'kills', 'điểm')}
       ${accountantLine}
     </div>
 
@@ -852,8 +893,15 @@ function copyBXH() {
   const r = computeBXH();
   let txt = `TỔNG KẾT RƯƠNG LIÊN MINH\n\n`;
   
-  txt += `RƯƠNG 1 (Top 10 Diệt):\n`;
-  r.r1_kill.forEach((m,i)=> txt += `${i+1}. ${m.name}${m.isAccountant ? ' [Kế toán]' : ''} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
+  const accountant = r.r1_accountant;
+  if (accountant) {
+    txt += `RƯƠNG 1 (Kế toán + Top 9 Diệt):\n`;
+    txt += `0. ${accountant.name} [Kế toán] (Diệt: ${accountant.kills.toLocaleString()}, Phá: ${accountant.destroy.toLocaleString()}, Tháp: ${accountant.tower.toLocaleString()})\n`;
+    r.r1_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
+  } else {
+    txt += `RƯƠNG 1 (Top 10 Diệt):\n`;
+    r.r1_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);
+  }
   
   txt += `\nRƯƠNG 2:\n[Diệt]\n`;
   r.r2_kill.forEach((m,i)=> txt += `${i+1}. ${m.name} (Diệt: ${m.kills.toLocaleString()}, Phá: ${m.destroy.toLocaleString()}, Tháp: ${m.tower.toLocaleString()})\n`);

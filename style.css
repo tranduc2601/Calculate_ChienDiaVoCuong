@@ -291,6 +291,11 @@ td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
 tr.row-accountant { background: rgba(201, 168, 76, 0.12); }
 tr.row-accountant:hover { background: rgba(201, 168, 76, 0.18); }
 
+.rank-kt {
+  color: var(--gold-light);
+  font-weight: 900;
+}
+
 @media (max-width: 640px) {
   .members-layout { flex-direction: column; }
   .members-sidebar { flex: none; width: 100%; min-width: 0; }
