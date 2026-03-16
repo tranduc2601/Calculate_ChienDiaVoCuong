@@ -187,6 +187,51 @@
   </div>
 
   <div class="card">
+    <div class="card-title">Cấu hình số lượng rương</div>
+    <div style="display:flex; flex-wrap:wrap; gap:0.75rem; font-size:0.8rem;">
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 1 - Tổng số</div>
+        <input type="number" id="cfg-r1-total" min="0" style="width:100%;">
+      </div>
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 2 - Diệt địch</div>
+        <input type="number" id="cfg-r2-kill" min="0" style="width:100%;">
+      </div>
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 2 - Tháp</div>
+        <input type="number" id="cfg-r2-tower" min="0" style="width:100%;">
+      </div>
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 3 - Phá thành</div>
+        <input type="number" id="cfg-r3-des" min="0" style="width:100%;">
+      </div>
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 3 - Tháp</div>
+        <input type="number" id="cfg-r3-tower" min="0" style="width:100%;">
+      </div>
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 4 - Tháp</div>
+        <input type="number" id="cfg-r4-tow" min="0" style="width:100%;">
+      </div>
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 4 - Diệt địch</div>
+        <input type="number" id="cfg-r4-kill" min="0" style="width:100%;">
+      </div>
+      <div style="flex:1; min-width:130px;">
+        <div>Rương 4 - Phá thành</div>
+        <input type="number" id="cfg-r4-des" min="0" style="width:100%;">
+      </div>
+    </div>
+    <div class="flex-row mt-1">
+      <button class="btn btn-gold" onclick="saveChestCfg()"><i class="fa-solid fa-floppy-disk"></i> Lưu cấu hình</button>
+      <button class="btn btn-red" onclick="resetChestCfgToDefault()"><i class="fa-solid fa-rotate-left"></i> Về mặc định</button>
+    </div>
+    <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.4rem;">
+      Thay đổi các con số này để điều chỉnh số lượng rương được phát cho từng nhóm (Diệt địch / Phá thành / Tháp canh).
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-title">Quy Tắc Rương Đang Áp Dụng</div>
     <ul style="font-size:0.85rem; color:var(--text-dim); line-height:1.6; padding-left:1rem">
       <li><strong style="color:var(--gold)">Rương 1 (x10)</strong>: Nếu có Kế toán ➜ Kế toán (ghim cố định) + Top 9 Diệt Địch; nếu không có Kế toán ➜ Top 10 Diệt Địch.</li>

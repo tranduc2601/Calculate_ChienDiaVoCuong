@@ -10,7 +10,8 @@ let state = {
     updatedAt: 0,
     weekAnchorMs: 0, // computed "week start" anchor (Mon 21:00)
     weekLabel: "",
-    manualRange: null // {startMs, endMs}
+    manualRange: null, // {startMs, endMs}
+    chestCfg: null     // cấu hình số lượng rương
   },
   memberLogs: [], // {id, kind, payload, time}
   weekHistory: [] // {id, weekAnchorMs, label, createdAt, text}
@@ -49,6 +50,25 @@ function getStats(id) { return state.stats[id] || {kills:0, destroy:0, tower:0};
 // ==========================================
 // WEEK / TOWER RULES (Mon 21:00 → Sun 21:00)
 // ==========================================
+function getDefaultChestCfg() {
+  return {
+    r1Total: 10,
+    r2Kill: 5,
+    r2Tower: 5,
+    r3Des: 10,
+    r3Tower: 5,
+    r4Tow: 5,
+    r4Kill: 5,
+    r4Des: 5
+  };
+}
+
+function getChestCfg() {
+  if (!state.meta) state.meta = {};
+  if (!state.meta.chestCfg) state.meta.chestCfg = getDefaultChestCfg();
+  return state.meta.chestCfg;
+}
+
 function getWeekAnchorMs(nowMs = Date.now()) {
   const d = new Date(nowMs);
   const day = d.getDay(); // 0=Sun..6=Sat
@@ -829,6 +849,7 @@ function undoLog(logId) {
 // ==========================================
 function computeBXH() {
   ensureWeek();
+  const chestCfg = getChestCfg();
   const data = state.members.map(m => {
     const s = getStats(m.id);
     return {
@@ -846,17 +867,18 @@ function computeBXH() {
   const exclude = (list, excludeIds) => list.filter(m => !excludeIds.has(m.id));
 
   // --- RƯƠNG 1 ---
-  // Nếu có Kế toán: ghim Kế toán + Top 9 diệt địch (không tính Kế toán)
-  // Nếu không có Kế toán: Top 10 diệt địch
+  // Nếu có Kế toán: ghim Kế toán + Top (r1Total-1) diệt địch (không tính Kế toán)
+  // Nếu không có Kế toán: Top r1Total diệt địch
   const accountant = state.members.find(m => m.isAccountant);
   let r1_accountant = null;
   let r1_kill = [];
   if (accountant) {
     r1_accountant = data.find(d => d.id === accountant.id) || null;
     const withoutAcc = byKill.filter(m => m.id !== accountant.id);
-    r1_kill = withoutAcc.slice(0, 9);
+    const r1KillSlots = Math.max(0, (chestCfg.r1Total || 0) - 1);
+    r1_kill = withoutAcc.slice(0, r1KillSlots);
   } else {
-    r1_kill = byKill.slice(0, 10);
+    r1_kill = byKill.slice(0, chestCfg.r1Total || 0);
   }
   const set_r1 = new Set([
     ...r1_kill.map(m => m.id),
@@ -864,25 +886,25 @@ function computeBXH() {
   ]);
 
   // --- RƯƠNG 2 ---
-  const r2_kill = exclude(byKill, set_r1).slice(0, 5);
+  const r2_kill = exclude(byKill, set_r1).slice(0, chestCfg.r2Kill || 0);
   const set_r2_kill = new Set(r2_kill.map(m=>m.id));
-  const r2_tower = exclude(byTow, new Set([...set_r1, ...set_r2_kill])).slice(0, 5);
+  const r2_tower = exclude(byTow, new Set([...set_r1, ...set_r2_kill])).slice(0, chestCfg.r2Tower || 0);
   const set_r2 = new Set([...set_r2_kill, ...r2_tower.map(m=>m.id)]);
 
   // --- RƯƠNG 3 ---
   const all_r12 = new Set([...set_r1, ...set_r2]);
-  const r3_des = exclude(byDes, all_r12).slice(0, 10);
+  const r3_des = exclude(byDes, all_r12).slice(0, chestCfg.r3Des || 0);
   const set_r3_des = new Set(r3_des.map(m=>m.id));
-  const r3_tower = exclude(byTow, new Set([...all_r12, ...set_r3_des])).slice(0, 5);
+  const r3_tower = exclude(byTow, new Set([...all_r12, ...set_r3_des])).slice(0, chestCfg.r3Tower || 0);
   const set_r3 = new Set([...set_r3_des, ...r3_tower.map(m=>m.id)]);
 
   // --- RƯƠNG 4 ---
   const all_r123 = new Set([...all_r12, ...set_r3]);
-  const r4_tow = exclude(byTow, all_r123).slice(0, 5);
+  const r4_tow = exclude(byTow, all_r123).slice(0, chestCfg.r4Tow || 0);
   const set_r4_tow = new Set(r4_tow.map(m=>m.id));
-  const r4_kill = exclude(byKill, new Set([...all_r123, ...set_r4_tow])).slice(0, 5);
+  const r4_kill = exclude(byKill, new Set([...all_r123, ...set_r4_tow])).slice(0, chestCfg.r4Kill || 0);
   const set_r4_kill = new Set(r4_kill.map(m=>m.id));
-  const r4_des = exclude(byDes, new Set([...all_r123, ...set_r4_tow, ...set_r4_kill])).slice(0, 5);
+  const r4_des = exclude(byDes, new Set([...all_r123, ...set_r4_tow, ...set_r4_kill])).slice(0, chestCfg.r4Des || 0);
 
   return { r1_accountant, r1_kill, r2_kill, r2_tower, r3_des, r3_tower, r4_tow, r4_kill, r4_des };
 }
@@ -919,6 +941,7 @@ function buildTable(list, valKey, suffix, opts) {
 
 function renderBXH() {
   ensureWeek();
+  const cfg = getChestCfg();
   const r = computeBXH();
   const accountantMember = state.members.find(m => m.isAccountant);
   const hasAccountant = !!accountantMember;
@@ -947,9 +970,11 @@ function renderBXH() {
 
   document.getElementById('bxh-content').innerHTML = `
     <div class="card">
-      <div class="card-title"><span class="badge b-r1">RƯƠNG 1 (x10)</span></div>
+      <div class="card-title"><span class="badge b-r1">RƯƠNG 1 (x${cfg.r1Total || 0})</span></div>
       <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">
-        ${hasAccountant ? 'Kế toán (ghim cố định) + Top 9 diệt địch' : 'Top 10 diệt địch'}
+        ${hasAccountant
+          ? 'Kế toán (ghim cố định) + Top ' + Math.max(0, (cfg.r1Total || 0) - 1) + ' diệt địch'
+          : 'Top ' + (cfg.r1Total || 0) + ' diệt địch'}
       </div>
       <table>
         <tbody>
@@ -961,24 +986,24 @@ function renderBXH() {
     </div>
 
     <div class="card">
-      <div class="card-title"><span class="badge b-r2">RƯƠNG 2 (x10)</span></div>
-      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP 5 DIỆT ĐỊCH (Tiếp)</div>
+      <div class="card-title"><span class="badge b-r2">RƯƠNG 2 (x${(cfg.r2Kill || 0) + (cfg.r2Tower || 0)})</span></div>
+      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP ${cfg.r2Kill || 0} DIỆT ĐỊCH (Tiếp)</div>
       ${buildTable(r.r2_kill, 'kills', 'điểm')}
       <div style="font-size:0.7rem; color:var(--text-dim); margin:1rem 0 0.5rem 0">TOP 5 THÁP CANH</div>
       ${buildTable(r.r2_tower, 'towerWeek', 'lượt')}
     </div>
 
     <div class="card">
-      <div class="card-title"><span class="badge b-r3">RƯƠNG 3 (x15)</span></div>
-      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP 10 PHÁ THÀNH</div>
+      <div class="card-title"><span class="badge b-r3">RƯƠNG 3 (x${(cfg.r3Des || 0) + (cfg.r3Tower || 0)})</span></div>
+      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP ${cfg.r3Des || 0} PHÁ THÀNH</div>
       ${buildTable(r.r3_des, 'destroy', 'điểm')}
       <div style="font-size:0.7rem; color:var(--text-dim); margin:1rem 0 0.5rem 0">TOP 5 THÁP CANH (Tiếp)</div>
       ${buildTable(r.r3_tower, 'towerWeek', 'lượt')}
     </div>
 
     <div class="card">
-      <div class="card-title"><span class="badge b-r4">RƯƠNG 4 (x15)</span></div>
-      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP 5 THÁP CANH (Tiếp)</div>
+      <div class="card-title"><span class="badge b-r4">RƯƠNG 4 (x${(cfg.r4Tow || 0) + (cfg.r4Kill || 0) + (cfg.r4Des || 0)})</span></div>
+      <div style="font-size:0.7rem; color:var(--text-dim); margin-bottom:0.5rem">TOP ${cfg.r4Tow || 0} THÁP CANH (Tiếp)</div>
       ${buildTable(r.r4_tow, 'towerWeek', 'lượt')}
       <div style="font-size:0.7rem; color:var(--text-dim); margin:1rem 0 0.5rem 0">TOP 5 DIỆT ĐỊCH (Tiếp)</div>
       ${buildTable(r.r4_kill, 'kills', 'điểm')}
@@ -1376,6 +1401,58 @@ function clearManualRange() {
   if (inpEnd) inpEnd.value = '';
 }
 
+function fillChestCfgUI() {
+  const cfg = getChestCfg();
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v;
+  };
+  setVal('cfg-r1-total', cfg.r1Total || 0);
+  setVal('cfg-r2-kill', cfg.r2Kill || 0);
+  setVal('cfg-r2-tower', cfg.r2Tower || 0);
+  setVal('cfg-r3-des', cfg.r3Des || 0);
+  setVal('cfg-r3-tower', cfg.r3Tower || 0);
+  setVal('cfg-r4-tow', cfg.r4Tow || 0);
+  setVal('cfg-r4-kill', cfg.r4Kill || 0);
+  setVal('cfg-r4-des', cfg.r4Des || 0);
+}
+
+function saveChestCfg() {
+  if (!state.meta) state.meta = {};
+  const cur = getChestCfg();
+  const read = (id, fallback) => {
+    const el = document.getElementById(id);
+    if (!el) return fallback;
+    const v = parseInt(el.value, 10);
+    return isNaN(v) || v < 0 ? fallback : v;
+  };
+  const next = {
+    r1Total: read('cfg-r1-total', cur.r1Total),
+    r2Kill: read('cfg-r2-kill', cur.r2Kill),
+    r2Tower: read('cfg-r2-tower', cur.r2Tower),
+    r3Des: read('cfg-r3-des', cur.r3Des),
+    r3Tower: read('cfg-r3-tower', cur.r3Tower),
+    r4Tow: read('cfg-r4-tow', cur.r4Tow),
+    r4Kill: read('cfg-r4-kill', cur.r4Kill),
+    r4Des: read('cfg-r4-des', cur.r4Des)
+  };
+  state.meta.chestCfg = next;
+  bumpUpdatedAt();
+  saveAll();
+  renderBXH();
+  toast('Đã lưu cấu hình rương.');
+}
+
+function resetChestCfgToDefault() {
+  if (!state.meta) state.meta = {};
+  state.meta.chestCfg = getDefaultChestCfg();
+  bumpUpdatedAt();
+  saveAll();
+  fillChestCfgUI();
+  renderBXH();
+  toast('Đã đưa cấu hình rương về mặc định.');
+}
+
 // ==========================================
 // INIT
 // ==========================================
@@ -1414,6 +1491,7 @@ window.addEventListener('load', () => {
     if (inpEnd && e) inpEnd.value = toVal(e);
   }
   updateWeekLabelView();
+  fillChestCfgUI();
 });
 
 function applyViewModeFromUrl() {
