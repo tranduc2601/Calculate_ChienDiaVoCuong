@@ -1,0 +1,153 @@
+// ==========================================
+// RANKING / CHIA RƯƠNG (waterfall, sqrt…)
+// ==========================================
+
+export const DEFAULT_CHEST_CONFIG = {
+  chests: [
+    {
+      id: 'R1',
+      name: 'Rương 1',
+      total_chests: 15,
+      reserved_slots: 1,
+      slots: [
+        { criteria: 'kills', count: 10, label: 'Top Diệt' },
+        { criteria: 'sabotage', count: 3, label: 'Top Phá' },
+        { criteria: 'speed', count: 1, label: 'Top Tốc' }
+      ],
+      exclude_higher_chest: true
+    },
+    {
+      id: 'R2',
+      name: 'Rương 2',
+      total_chests: 15,
+      reserved_slots: 0,
+      slots: [
+        { criteria: 'kills', count: 8, label: 'Top Diệt' },
+        { criteria: 'sabotage', count: 4, label: 'Top Phá' },
+        { criteria: 'speed', count: 3, label: 'Top Tốc' }
+      ],
+      exclude_higher_chest: true
+    },
+    {
+      id: 'R3',
+      name: 'Rương 3',
+      total_chests: 20,
+      reserved_slots: 0,
+      slots: [
+        { criteria: 'kills', count: 15, label: 'Top Diệt' },
+        { criteria: 'sabotage', count: 3, label: 'Top Phá' },
+        { criteria: 'speed', count: 2, label: 'Top Tốc' }
+      ],
+      exclude_higher_chest: true
+    },
+    {
+      id: 'R4',
+      name: 'Rương 4',
+      total_chests: 20,
+      reserved_slots: 0,
+      slots: [
+        { criteria: 'kills', count: 15, label: 'Top Diệt' },
+        { criteria: 'sabotage', count: 3, label: 'Top Phá' },
+        { criteria: 'speed', count: 2, label: 'Top Tốc' }
+      ],
+      exclude_higher_chest: false
+    }
+  ]
+};
+
+export const CHEST_UI_ROW_META = [
+  { id: 'R1', name: 'Rương 1', reserved_slots: 1, exclude_higher_chest: true },
+  { id: 'R2', name: 'Rương 2', reserved_slots: 0, exclude_higher_chest: true },
+  { id: 'R3', name: 'Rương 3', reserved_slots: 0, exclude_higher_chest: true },
+  { id: 'R4', name: 'Rương 4', reserved_slots: 0, exclude_higher_chest: false }
+];
+
+export function getFirebaseChestConfig(state) {
+  if (!state.meta) state.meta = {};
+  const c = state.meta.firebaseChestConfig;
+  if (c && Array.isArray(c.chests) && c.chests.length > 0) return c;
+  return DEFAULT_CHEST_CONFIG;
+}
+
+export function getRuleMode(state) {
+  const m = (state.meta && state.meta.ruleMode) || 'waterfall';
+  return m;
+}
+
+export function metricValueForCriteria(m, criteria) {
+  switch (criteria) {
+    case 'kills': return Number(m.kills) || 0;
+    case 'sabotage': return Number(m.destroy) || 0;
+    case 'speed': return Number(m.towerWeek) || 0;
+    default: return 0;
+  }
+}
+
+export function calcWaterfall(membersRow, chestConfigDoc) {
+  const chestsDef = (chestConfigDoc && chestConfigDoc.chests) ? chestConfigDoc.chests : [];
+  const members = membersRow.map(m => ({
+    ...m,
+    kills: Number(m.kills) || 0,
+    destroy: Number(m.destroy) || 0,
+    towerWeek: Number(m.towerWeek) || 0
+  }));
+  const accountant = members.find(m => m.isAccountant);
+  const hasReceived = new Set();
+  const out = [];
+
+  chestsDef.forEach((chest, idx) => {
+    const assignedInChest = new Set();
+    const groupsOut = [];
+    const pinned = [];
+    const priorReceived = new Set(hasReceived);
+    const excludeHigher = chest.exclude_higher_chest !== false;
+
+    if (Number(chest.reserved_slots) > 0 && accountant && chest.id === 'R1') {
+      pinned.push(accountant);
+      assignedInChest.add(accountant.id);
+    }
+
+    const poolBase = (m) => {
+      if (assignedInChest.has(m.id)) return false;
+      if (excludeHigher && priorReceived.has(m.id)) return false;
+      return true;
+    };
+
+    (chest.slots || []).forEach((slot) => {
+      const crit = slot.criteria || 'kills';
+      const count = Math.max(0, Number(slot.count) || 0);
+      const label = slot.label || crit;
+      let pool = members.filter(poolBase);
+      pool.sort((a, b) => metricValueForCriteria(b, crit) - metricValueForCriteria(a, crit));
+      const picked = [];
+      for (let i = 0; i < pool.length && picked.length < count; i++) {
+        const mm = pool[i];
+        if (assignedInChest.has(mm.id)) continue;
+        picked.push(mm);
+        assignedInChest.add(mm.id);
+      }
+      groupsOut.push({ label, criteria: crit, list: picked });
+    });
+
+    assignedInChest.forEach((id) => hasReceived.add(id));
+
+    out.push({
+      id: chest.id || ('R' + (idx + 1)),
+      name: chest.name || ('Rương ' + (idx + 1)),
+      total_chests: Number(chest.total_chests) || 0,
+      reserved_slots: Number(chest.reserved_slots) || 0,
+      pinned,
+      groups: groupsOut
+    });
+  });
+
+  return out;
+}
+
+export function calculateRankings(membersRow, chestConfigDoc, ruleMode) {
+  switch (ruleMode) {
+    case 'waterfall': return calcWaterfall(membersRow, chestConfigDoc);
+    // case 'sqrt': return calcSqrt(membersRow, chestConfigDoc); // TODO
+    default: return calcWaterfall(membersRow, chestConfigDoc);
+  }
+}

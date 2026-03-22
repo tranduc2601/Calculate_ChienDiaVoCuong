@@ -62,6 +62,74 @@ input:focus { border-color: var(--gold); }
 .btn-red { background: var(--crimson); color: #fff; }
 .btn-sm { padding: 0.4rem 0.7rem; font-size: 0.7rem; }
 
+.speed-range-link {
+  display: inline-block;
+  margin-top: 0.45rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--gold-light);
+  font-family: 'Crimson Pro', serif;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.speed-range-link:hover { color: var(--gold); }
+
+/* Admin — cấu hình rương (UI đơn giản) */
+.chest-simple-ui {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.chest-simple-block {
+  background: var(--bg-card2);
+  border: 1px solid var(--border-gold);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+.chest-simple-block-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 0.5rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35rem;
+}
+.chest-simple-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-bottom: 0.45rem;
+}
+.chest-simple-label:last-child { margin-bottom: 0; }
+.chest-simple-input {
+  width: 100%;
+  padding: 0.45rem 0.5rem !important;
+  font-size: 0.95rem !important;
+}
+
+.btn-chest-save {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.85rem 1rem !important;
+  font-size: 0.95rem !important;
+  font-weight: 700 !important;
+  background: linear-gradient(135deg, #1a5c38, #27ae60) !important;
+  color: #fff !important;
+  border: 1px solid #2ecc71 !important;
+  box-shadow: 0 2px 12px rgba(46, 204, 113, 0.25);
+}
+.btn-chest-save:hover {
+  filter: brightness(1.08);
+}
+
 /* LISTS & TABLES */
 .search-box { position: relative; margin-bottom: 1rem; }
 .list-container { max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card2); }
@@ -294,6 +362,58 @@ tr.row-accountant:hover { background: rgba(201, 168, 76, 0.18); }
 .rank-kt {
   color: var(--gold-light);
   font-weight: 900;
+}
+
+.startup-connect {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 10, 6, 0.92);
+  z-index: 12000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.startup-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-gold);
+  border-radius: 10px;
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-main);
+}
+#startup-loading-text {
+  font-size: 0.9rem;
+  color: var(--gold-light);
+  margin-bottom: 0.8rem;
+}
+.chest-item {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+.chest-item-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--gold-light);
+}
+.chest-item textarea {
+  width: 100%;
+  min-height: 72px;
+  background: var(--bg-mid);
+  border: 1px solid var(--border-gold);
+  color: var(--text-main);
+  border-radius: 6px;
+  padding: 0.45rem;
+  font-family: monospace;
+  font-size: 0.76rem;
 }
 
 @media (max-width: 640px) {
