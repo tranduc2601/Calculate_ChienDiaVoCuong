@@ -32,12 +32,10 @@ export const CLOUD_CFG_KEY = 'minhchu_cloud_cfg_v1';
 
 export function saveLocal() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
-export function load() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw) {
-    try { state = JSON.parse(raw); } catch(e) {}
-  }
-  // Ensure stats object exists for backward compatibility
+/** Chuẩn hóa shape state sau khi load từ local hoặc merge từ Firebase */
+export function normalizeStateShape() {
+  if (!state.members) state.members = [];
+  if (!state.stats) state.stats = {};
   state.members.forEach(m => {
     if(!state.stats[m.id]) state.stats[m.id] = {kills:0, destroy:0, tower:0, towerWeek:0, speed_start:0, speed_end:0, speed_total:0};
     if (typeof state.stats[m.id].towerWeek === 'undefined') {
@@ -52,12 +50,20 @@ export function load() {
   if (!state.towerBase) state.towerBase = {};
   if (!state.memberLogs) state.memberLogs = [];
   if (!state.weekHistory) state.weekHistory = [];
-  // Chỉ cho phép 1 kế toán: giữ người đầu tiên được đánh dấu
+  if (!state.logs) state.logs = [];
   const accountants = state.members.filter(m => m.isAccountant);
   if (accountants.length > 1) {
     state.members.forEach(m => { m.isAccountant = false; });
     state.members.find(m => m.id === accountants[0].id).isAccountant = true;
   }
+}
+
+export function load() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw) {
+    try { state = JSON.parse(raw); } catch(e) {}
+  }
+  normalizeStateShape();
 }
 
 export function getStats(id) {
@@ -139,7 +145,11 @@ export let cloud = {
   chestCfgUnsub: null,
   ruleUnsub: null,
   lastRemoteUpdatedAt: 0,
-  writeTimer: null
+  writeTimer: null,
+  /** Đã nhận ít nhất một snapshot từ doc chính — chặn ghi lên Firebase trước bước này */
+  mainDocSnapshotReceived: false,
+  /** Người dùng vừa xóa hết thành viên — cho phép ghi payload rỗng một lần */
+  allowEmptyStateWrite: false
 };
 
 export function bumpUpdatedAt() {
@@ -230,10 +240,13 @@ export async function connectCloud() {
     cloud.db = firebase.firestore();
     await cloud.auth.signInAnonymously();
     cloud.enabled = true;
+    cloud.mainDocSnapshotReceived = false;
+    cloud.allowEmptyStateWrite = false;
     setCloudStatus('Đã kết nối');
+    await hydrateMainDocFromServer();
     startCloudListener();
     await ensureChestConfigFromRemote();
-    scheduleCloudWrite(true);
+    // Không ghi state lên Cloud khi vừa kết nối — chỉ đọc snapshot; ghi chỉ sau thao tác user hoặc syncNow (khi đã có snapshot)
     uiHooks.markStartupConnected?.();
     uiHooks.stopConnectPromptLoop?.();
     uiHooks.hideConnectPromptModal?.();
@@ -267,6 +280,55 @@ export function cloudDocRef() {
   return cloud.db.collection('minhchu_bxh').doc('state');
 }
 
+function applyRemoteMainDoc(payload, remoteUpdatedAt) {
+  state = payload;
+  if (!state.meta) state.meta = { updatedAt: remoteUpdatedAt, weekAnchorMs: 0, weekLabel: "" };
+  normalizeStateShape();
+  cloud.lastRemoteUpdatedAt = remoteUpdatedAt;
+  saveLocal();
+  uiHooks.renderBXH?.();
+  uiHooks.renderMemberList?.();
+  uiHooks.renderEntryList?.();
+  uiHooks.renderHistory?.();
+}
+
+/** Lần đầu sau kết nối: đọc từ server (tránh snapshot cache rỗng ghi đè logic). Không ghi Firebase. */
+export async function hydrateMainDocFromServer() {
+  if (!cloud.enabled || !cloud.db) return;
+  try {
+    const snap = await cloudDocRef().get({ source: 'server' });
+    cloud.mainDocSnapshotReceived = true;
+    if (!snap.exists) {
+      cloud.lastRemoteUpdatedAt = 0;
+      return;
+    }
+    const remote = snap.data();
+    if (!remote?.payload) {
+      cloud.lastRemoteUpdatedAt = remote?.updatedAt || 0;
+      return;
+    }
+    const remoteUpdatedAt = remote.updatedAt || 0;
+    const rp = remote.payload;
+    const remoteMembers = rp.members || [];
+    const localMembers = state.members || [];
+    const localUpdatedAt = state.meta?.updatedAt || 0;
+    const shouldApply =
+      (remoteMembers.length > 0 && localMembers.length === 0) ||
+      (remoteUpdatedAt > localUpdatedAt);
+    if (shouldApply) {
+      try {
+        applyRemoteMainDoc(rp, remoteUpdatedAt);
+        uiHooks.toast?.('Đã tải dữ liệu từ Cloud.');
+      } catch (e) {}
+    } else {
+      cloud.lastRemoteUpdatedAt = Math.max(cloud.lastRemoteUpdatedAt, remoteUpdatedAt);
+    }
+  } catch (e) {
+    cloud.mainDocSnapshotReceived = true;
+    cloud.lastRemoteUpdatedAt = 0;
+  }
+}
+
 export function startCloudListener() {
   if (!cloud.enabled) return;
   if (cloud.unsub) return;
@@ -278,16 +340,9 @@ export function startCloudListener() {
     const remoteUpdatedAt = remote.updatedAt || 0;
     if (remoteUpdatedAt <= (state.meta?.updatedAt || 0)) return;
     try {
-      state = remote.payload;
-      if (!state.meta) state.meta = { updatedAt: remoteUpdatedAt, weekAnchorMs: 0, weekLabel: "" };
-      cloud.lastRemoteUpdatedAt = remoteUpdatedAt;
-      saveLocal(); // cache
-      uiHooks.renderBXH?.();
-      uiHooks.renderMemberList?.();
-      uiHooks.renderEntryList?.();
-      uiHooks.renderHistory?.();
+      applyRemoteMainDoc(remote.payload, remoteUpdatedAt);
       uiHooks.toast?.('Đã cập nhật dữ liệu mới từ Cloud.');
-    } catch(e) {}
+    } catch (e) {}
   });
   if (!cloud.weeklyUnsub) {
     cloud.weeklyUnsub = cloud.db.collection('weekly_history').limit(200).onSnapshot((snap) => {
@@ -338,8 +393,21 @@ export function scheduleCloudWrite(force = false) {
   cloud.writeTimer = setTimeout(() => writeCloud(force), force ? 0 : 800);
 }
 
+/**
+ * Ghi state lên Firestore (đồng bộ Cloud). Không gọi trong lúc khởi tạo / trước snapshot doc chính.
+ * Alias theo tên mô tả nghiệp vụ — logic nằm ở đây.
+ */
+export async function saveDataToFirebase(force = false) {
+  return writeCloud(force);
+}
+
 export async function writeCloud(force = false) {
   if (!cloud.enabled) return;
+  if (!cloud.mainDocSnapshotReceived) return;
+  const members = state.members || [];
+  if (members.length === 0 && !cloud.allowEmptyStateWrite) {
+    return;
+  }
   const localUpdatedAt = state.meta?.updatedAt || 0;
   if (!force && localUpdatedAt <= cloud.lastRemoteUpdatedAt) return;
   try {
@@ -347,6 +415,7 @@ export async function writeCloud(force = false) {
       updatedAt: localUpdatedAt,
       payload: state
     }, { merge: true });
+    if (members.length === 0) cloud.allowEmptyStateWrite = false;
   } catch(e) {
     setCloudStatus('Lỗi ghi');
   }
@@ -354,6 +423,10 @@ export async function writeCloud(force = false) {
 
 export function syncNow() {
   if (!cloud.enabled) { uiHooks.toast?.('Chưa kết nối Cloud.'); return; }
+  if (!cloud.mainDocSnapshotReceived) {
+    uiHooks.toast?.('Đang chờ tải dữ liệu từ Cloud, thử lại sau vài giây.');
+    return;
+  }
   bumpUpdatedAt();
   saveAll();
   uiHooks.toast?.('Đang đồng bộ...');
@@ -370,7 +443,6 @@ export async function ensureChestConfigFromRemote() {
     const data = snap.exists ? snap.data() : null;
     const chests = data?.chests;
     if (!snap.exists || !Array.isArray(chests) || chests.length === 0) {
-      await ref.set(DEFAULT_CHEST_CONFIG);
       if (!state.meta) state.meta = {};
       state.meta.firebaseChestConfig = DEFAULT_CHEST_CONFIG;
       saveLocal();

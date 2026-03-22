@@ -116,6 +116,7 @@ export function deleteMember(id) {
     delete state.stats[id];
     if (state.towerBase) delete state.towerBase[id];
     if (m) logMemberChange('remove', { memberId: id, name: m.name });
+    if (state.members.length === 0) cloud.allowEmptyStateWrite = true;
     bumpUpdatedAt();
     saveAll();
     renderMemberList();
@@ -129,6 +130,7 @@ export function deleteMemberInternal(id) {
   delete state.stats[id];
   if (state.towerBase) delete state.towerBase[id];
   if (m) logMemberChange('remove', { memberId: id, name: m.name });
+  if (state.members.length === 0) cloud.allowEmptyStateWrite = true;
   bumpUpdatedAt();
   saveAll();
 }
