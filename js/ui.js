@@ -11,7 +11,10 @@ import {
   getCloudCfg,
   saveFirebaseConfig,
   clearFirebaseConfig,
-  syncNow
+  syncNow,
+  getWeekAnchorMs,
+  getWeekId,
+  formatWeekLabel
 } from './database.js';
 import {
   calculateRankings,
