@@ -98,15 +98,22 @@ export function calcWaterfall(membersRow, chestConfigDoc) {
   chestsDef.forEach((chest, idx) => {
     const groupsOut = [];
     const pinned = [];
+    const reservedSlots = Math.max(0, Number(chest.reserved_slots) || 0);
+    const slots = Array.isArray(chest.slots) ? chest.slots : [];
+    const normalizedTotal = reservedSlots + slots.reduce((sum, s) => sum + (Math.max(0, Number(s.count) || 0)), 0);
+    let awardedInChest = 0;
 
-    if (Number(chest.reserved_slots) > 0 && accountant && chest.id === 'R1') {
+    if (reservedSlots > 0 && accountant && chest.id === 'R1') {
       pinned.push(accountant);
       awardedIds.add(accountant.id);
+      awardedInChest += 1;
     }
 
-    (chest.slots || []).forEach((slot) => {
+    slots.forEach((slot) => {
       const crit = slot.criteria || 'kills';
-      const count = Math.max(0, Number(slot.count) || 0);
+      const requested = Math.max(0, Number(slot.count) || 0);
+      const remaining = Math.max(0, normalizedTotal - awardedInChest);
+      const count = Math.min(requested, remaining);
       const label = slot.label || crit;
 
       let availablePool = members.filter(m => !awardedIds.has(m.id));
@@ -117,6 +124,7 @@ export function calcWaterfall(membersRow, chestConfigDoc) {
         const mm = availablePool[i];
         picked.push(mm);
         awardedIds.add(mm.id);
+        awardedInChest += 1;
       }
       groupsOut.push({ label, criteria: crit, list: picked });
     });
@@ -124,8 +132,8 @@ export function calcWaterfall(membersRow, chestConfigDoc) {
     out.push({
       id: chest.id || ('R' + (idx + 1)),
       name: chest.name || ('Rương ' + (idx + 1)),
-      total_chests: Number(chest.total_chests) || 0,
-      reserved_slots: Number(chest.reserved_slots) || 0,
+      total_chests: normalizedTotal,
+      reserved_slots: reservedSlots,
       pinned,
       groups: groupsOut
     });
