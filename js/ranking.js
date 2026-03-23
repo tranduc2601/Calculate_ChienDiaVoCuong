@@ -92,44 +92,34 @@ export function calcWaterfall(membersRow, chestConfigDoc) {
     towerWeek: Number(m.towerWeek) || 0
   }));
   const accountant = members.find(m => m.isAccountant);
-  const hasReceived = new Set();
+  const awardedIds = new Set();
   const out = [];
 
   chestsDef.forEach((chest, idx) => {
-    const assignedInChest = new Set();
     const groupsOut = [];
     const pinned = [];
-    const priorReceived = new Set(hasReceived);
-    const excludeHigher = chest.exclude_higher_chest !== false;
 
     if (Number(chest.reserved_slots) > 0 && accountant && chest.id === 'R1') {
       pinned.push(accountant);
-      assignedInChest.add(accountant.id);
+      awardedIds.add(accountant.id);
     }
-
-    const poolBase = (m) => {
-      if (assignedInChest.has(m.id)) return false;
-      if (excludeHigher && priorReceived.has(m.id)) return false;
-      return true;
-    };
 
     (chest.slots || []).forEach((slot) => {
       const crit = slot.criteria || 'kills';
       const count = Math.max(0, Number(slot.count) || 0);
       const label = slot.label || crit;
-      let pool = members.filter(poolBase);
-      pool.sort((a, b) => metricValueForCriteria(b, crit) - metricValueForCriteria(a, crit));
+
+      let availablePool = members.filter(m => !awardedIds.has(m.id));
+      availablePool.sort((a, b) => metricValueForCriteria(b, crit) - metricValueForCriteria(a, crit));
+
       const picked = [];
-      for (let i = 0; i < pool.length && picked.length < count; i++) {
-        const mm = pool[i];
-        if (assignedInChest.has(mm.id)) continue;
+      for (let i = 0; i < availablePool.length && picked.length < count; i++) {
+        const mm = availablePool[i];
         picked.push(mm);
-        assignedInChest.add(mm.id);
+        awardedIds.add(mm.id);
       }
       groupsOut.push({ label, criteria: crit, list: picked });
     });
-
-    assignedInChest.forEach((id) => hasReceived.add(id));
 
     out.push({
       id: chest.id || ('R' + (idx + 1)),
