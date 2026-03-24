@@ -1499,7 +1499,8 @@ export function readChestSimpleFormToDoc() {
       const ns = Math.max(0, parseInt(document.getElementById(`chest-ui-${i}-sabotage`)?.value || '0', 10) || 0);
       const nt = Math.max(0, parseInt(document.getElementById(`chest-ui-${i}-speed`)?.value || '0', 10) || 0);
       const reserved = meta.reserved_slots;
-      const total_chests = reserved + nk + ns + nt;
+      // Tổng rương phải đúng bằng tổng slot cạnh tranh (không cộng thêm reserved).
+      const total_chests = nk + ns + nt;
       return {
         id: meta.id,
         name: meta.name,
