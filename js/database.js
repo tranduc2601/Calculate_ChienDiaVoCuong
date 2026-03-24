@@ -21,7 +21,8 @@ export let state = {
     manualRange: null, // {startMs, endMs}
     firebaseChestConfig: null, // { chests: [...] } từ Firebase settings/chest_config
     ruleMode: 'waterfall', // từ Firebase settings/rule_mode
-    currentWeekId: ""
+    currentWeekId: "",
+    memberHistoryV2: null // member_history v2 — per-member structure
   },
   memberLogs: [], // {id, kind, payload, time}
   weekHistory: [] // {id, weekAnchorMs, label, createdAt, text}
@@ -47,6 +48,7 @@ export function normalizeStateShape() {
   });
   if (!state.meta) state.meta = { updatedAt: 0, weekAnchorMs: 0, weekLabel: "" };
   if (typeof state.meta.ruleMode === 'undefined') state.meta.ruleMode = 'waterfall';
+  if (typeof state.meta.memberHistoryV2 === 'undefined') state.meta.memberHistoryV2 = null;
   if (!state.towerBase) state.towerBase = {};
   if (!state.memberLogs) state.memberLogs = [];
   if (!state.weekHistory) state.weekHistory = [];
@@ -127,6 +129,7 @@ export function ensureWeek() {
     saveAll();
   }
   if (!state.meta.currentWeekId) state.meta.currentWeekId = getWeekId(state.meta.weekAnchorMs || anchor);
+  restartMemberHistoryListener();
   uiHooks.updateWeekLabelView?.();
 }
 
@@ -142,6 +145,7 @@ export let cloud = {
   db: null,
   unsub: null,
   weeklyUnsub: null,
+  memberHistoryUnsub: null,
   chestCfgUnsub: null,
   ruleUnsub: null,
   lastRemoteUpdatedAt: 0,
@@ -263,10 +267,12 @@ export async function connectCloud() {
 export function disconnectCloud() {
   if (cloud.unsub) { try { cloud.unsub(); } catch(e) {} }
   if (cloud.weeklyUnsub) { try { cloud.weeklyUnsub(); } catch(e) {} }
+  if (cloud.memberHistoryUnsub) { try { cloud.memberHistoryUnsub(); } catch(e) {} }
   if (cloud.chestCfgUnsub) { try { cloud.chestCfgUnsub(); } catch(e) {} }
   if (cloud.ruleUnsub) { try { cloud.ruleUnsub(); } catch(e) {} }
   cloud.unsub = null;
   cloud.weeklyUnsub = null;
+  cloud.memberHistoryUnsub = null;
   cloud.chestCfgUnsub = null;
   cloud.ruleUnsub = null;
   cloud.enabled = false;
@@ -384,6 +390,80 @@ export function startCloudListener() {
       saveLocal();
       uiHooks.renderBXH?.();
     });
+  }
+  restartMemberHistoryListener();
+}
+
+export function restartMemberHistoryListener() {
+  if (cloud.memberHistoryUnsub) {
+    try { cloud.memberHistoryUnsub(); } catch (e) {}
+    cloud.memberHistoryUnsub = null;
+  }
+  if (!cloud.enabled || !cloud.db) return;
+  const weekId = state.meta?.currentWeekId || getWeekId(state.meta?.weekAnchorMs || getWeekAnchorMs());
+  cloud.memberHistoryUnsub = cloud.db.collection('member_history').doc(weekId).onSnapshot((snap) => {
+    if (!state.meta) state.meta = {};
+    if (!snap.exists) {
+      state.meta.memberHistoryV2 = { week_id: weekId, updated_at: Date.now(), members: {} };
+      saveLocal();
+      uiHooks.renderHistory?.();
+      return;
+    }
+    const data = snap.data() || {};
+    state.meta.memberHistoryV2 = {
+      week_id: data.week_id || weekId,
+      updated_at: data.updated_at || Date.now(),
+      members: data.members && typeof data.members === 'object' ? data.members : {}
+    };
+    saveLocal();
+    uiHooks.renderHistory?.();
+  });
+}
+
+export function getMemberHistoryV2WeekId() {
+  return state.meta?.currentWeekId || getWeekId(state.meta?.weekAnchorMs || getWeekAnchorMs());
+}
+
+export function getMemberHistoryV2Doc() {
+  const weekId = getMemberHistoryV2WeekId();
+  const doc = state.meta?.memberHistoryV2;
+  if (!doc || doc.week_id !== weekId || typeof doc.members !== 'object') {
+    return { week_id: weekId, updated_at: Date.now(), members: {} };
+  }
+  return doc;
+}
+
+export async function upsertMemberHistoryV2(memberId, memberRecord) {
+  const weekId = getMemberHistoryV2WeekId();
+  if (!state.meta) state.meta = {};
+  const existing = getMemberHistoryV2Doc();
+  const mergedMembers = { ...(existing.members || {}) };
+  mergedMembers[memberId] = memberRecord;
+  state.meta.memberHistoryV2 = { week_id: weekId, updated_at: Date.now(), members: mergedMembers };
+  saveLocal();
+  if (cloud.enabled && cloud.db) {
+    await cloud.db.collection('member_history').doc(weekId).set({
+      week_id: weekId,
+      updated_at: Date.now(),
+      [`members.${memberId}`]: memberRecord
+    }, { merge: true });
+  }
+}
+
+export async function removeMemberHistoryV2(memberId) {
+  const weekId = getMemberHistoryV2WeekId();
+  if (!state.meta) state.meta = {};
+  const existing = getMemberHistoryV2Doc();
+  const mergedMembers = { ...(existing.members || {}) };
+  delete mergedMembers[memberId];
+  state.meta.memberHistoryV2 = { week_id: weekId, updated_at: Date.now(), members: mergedMembers };
+  saveLocal();
+  if (cloud.enabled && cloud.db && window.firebase?.firestore?.FieldValue) {
+    await cloud.db.collection('member_history').doc(weekId).set({
+      week_id: weekId,
+      updated_at: Date.now(),
+      [`members.${memberId}`]: firebase.firestore.FieldValue.delete()
+    }, { merge: true });
   }
 }
 

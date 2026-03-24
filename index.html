@@ -42,7 +42,7 @@
 
   <div class="card">
     <div class="search-box">
-      <input type="text" id="search-entry" placeholder="Tìm tên thành viên (gõ @ để mở danh sách)..." onkeydown="handleAtOpenList(event)" onkeyup="renderEntryList()">
+      <input type="text" id="search-entry" placeholder="Tìm tên thành viên (gõ @ để mở danh sách)..." onkeydown="handleAtOpenList(event)" onkeyup="handleEntrySearchInput()">
     </div>
     <button type="button" class="btn btn-gold" style="width:100%;margin-bottom:0.75rem" onclick="openBulkInputModal()"><i class="fa-solid fa-table-list"></i> Nhập hàng loạt</button>
     <div class="list-container" id="entry-member-list"></div>
@@ -263,20 +263,42 @@
 </div>
 
 <div id="bulk-input-modal" class="modal-backdrop" style="display:none;">
-  <div class="modal-card" style="max-width:420px;">
+  <div class="modal-card" style="max-width:900px;">
     <div class="modal-title">Nhập hàng loạt</div>
     <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
-      <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.35rem;">Diệt &amp; Phá — mỗi dòng: <code>Tên Diệt Phá</code></div>
-      <textarea id="bulk-inp-kill-des" class="bulk-textarea" style="min-height:100px;" placeholder="TàoCáo 50000 1000"></textarea>
-      <div style="font-size:0.8rem;color:var(--text-dim);margin:0.6rem 0 0.35rem;">Tốc tháp — mỗi dòng: <code>Tên LượtTốc</code></div>
-      <textarea id="bulk-inp-speed" class="bulk-textarea" style="min-height:80px;" placeholder="TàoCáo 50"></textarea>
+      <div class="bulk-input-grid">
+        <div class="bulk-input-left">
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.35rem;">Diệt &amp; Phá — mỗi dòng: <code>Tên Diệt Phá</code></div>
+          <textarea id="bulk-inp-kill-des" class="bulk-textarea" style="min-height:120px;" placeholder="TàoCáo 50000 1000"></textarea>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin:0.6rem 0 0.35rem;">Tốc tháp — mỗi dòng: <code>Tên LượtTốc</code></div>
+          <textarea id="bulk-inp-speed" class="bulk-textarea" style="min-height:120px;" placeholder="TàoCáo 50"></textarea>
+        </div>
+        <div class="bulk-input-right">
+          <div class="bulk-error-head">
+            <div class="bulk-error-title">Dữ liệu lỗi / Không khớp 🔴</div>
+            <button type="button" class="btn btn-sm btn-red" onclick="clearBulkErrorLog()">Xóa log</button>
+          </div>
+          <div id="bulk-error-log" class="bulk-error-log"></div>
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button type="button" class="btn btn-gold" onclick="applyBulkInput()"><i class="fa-solid fa-check"></i> Áp dụng</button>
       <button type="button" class="btn btn-red" onclick="closeBulkInputModal()">Đóng</button>
     </div>
   </div>
-  <div class="modal-clickout" onclick="closeBulkInputModal()"></div>
+  <div class="modal-clickout"></div>
+</div>
+
+<div id="new-week-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div class="modal-title" id="new-week-modal-title">Cập nhật tuần mới</div>
+      <button type="button" class="modal-close-btn" onclick="closeNewWeekModal()" aria-label="Đóng">✕</button>
+    </div>
+    <div class="modal-body" id="new-week-modal-body"></div>
+    <div class="modal-actions" id="new-week-modal-actions"></div>
+  </div>
 </div>
 
 <div id="connect-prompt-modal" class="modal-backdrop" style="display:none;">
@@ -325,6 +347,44 @@
     </div>
   </div>
   <div class="modal-clickout" onclick="closeEditMemberModal()"></div>
+</div>
+
+<div id="edit-history-member-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-title">Sửa lịch sử tuần</div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-history-member-id">
+      <div style="margin-bottom:0.5rem;">
+        <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.2rem;">Tên</div>
+        <input type="text" id="edit-history-member-name" style="width:100%;">
+      </div>
+      <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+        <div style="flex:1;">
+          <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.2rem;">Diệt</div>
+          <input type="number" id="edit-history-member-kills" style="width:100%;" min="0">
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.2rem;">Phá</div>
+          <input type="number" id="edit-history-member-sabotage" style="width:100%;" min="0">
+        </div>
+      </div>
+      <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+        <div style="flex:1;">
+          <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.2rem;">Tốc</div>
+          <input type="number" id="edit-history-member-speed-total" style="width:100%;" min="0">
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:0.2rem;">Rương</div>
+          <input type="text" id="edit-history-member-chest" style="width:100%;" placeholder="R1 / R2 / R3 / R4">
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-gold" onclick="applyHistoryMemberEdit()"><i class="fa-solid fa-floppy-disk"></i> Lưu</button>
+      <button class="btn btn-red" onclick="closeHistoryMemberEditModal()">Hủy</button>
+    </div>
+  </div>
+  <div class="modal-clickout" onclick="closeHistoryMemberEditModal()"></div>
 </div>
 
 <!-- Firebase (optional, used for cloud sync) -->

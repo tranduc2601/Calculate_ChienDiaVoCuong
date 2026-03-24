@@ -143,6 +143,10 @@ export function calcWaterfall(membersRow, chestConfigDoc) {
 }
 
 export function calculateRankings(membersRow, chestConfigDoc, ruleMode) {
+  if (!chestConfigDoc || !Array.isArray(chestConfigDoc.chests) || chestConfigDoc.chests.length === 0) {
+    console.warn('calculateRankings: chestConfig chưa sẵn sàng, bỏ qua.');
+    return [];
+  }
   switch (ruleMode) {
     case 'waterfall': return calcWaterfall(membersRow, chestConfigDoc);
     // case 'sqrt': return calcSqrt(membersRow, chestConfigDoc); // TODO

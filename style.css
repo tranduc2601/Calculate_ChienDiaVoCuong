@@ -218,6 +218,30 @@ td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.4rem;
 }
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.modal-head .modal-title {
+  margin-bottom: 0;
+  flex: 1;
+}
+.modal-close-btn {
+  border: 1px solid var(--border-gold);
+  background: var(--bg-mid);
+  color: var(--gold-light);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.modal-close-btn:hover {
+  background: rgba(201,168,76,0.2);
+}
 .modal-body {
   font-size: 0.85rem;
   color: var(--text-main);
@@ -287,6 +311,48 @@ td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
   font-family: monospace;
   font-size: 0.8rem;
   resize: vertical;
+}
+.bulk-input-grid {
+  display: flex;
+  gap: 0.8rem;
+  align-items: stretch;
+}
+.bulk-input-left {
+  flex: 0 0 60%;
+  min-width: 0;
+}
+.bulk-input-right {
+  flex: 0 0 40%;
+  min-width: 0;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem;
+}
+.bulk-error-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.bulk-error-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.78rem;
+  color: var(--gold-light);
+}
+.bulk-error-log {
+  min-height: 280px;
+  max-height: 48vh;
+  overflow: auto;
+  background: var(--bg-mid);
+  border: 1px solid var(--border-gold);
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-family: monospace;
+  font-size: 0.76rem;
+  color: var(--text-main);
+  white-space: pre-wrap;
 }
 .members-table-wrap {
   overflow-x: auto;
@@ -419,4 +485,7 @@ tr.row-accountant:hover { background: rgba(201, 168, 76, 0.18); }
 @media (max-width: 640px) {
   .members-layout { flex-direction: column; }
   .members-sidebar { flex: none; width: 100%; min-width: 0; }
+  .bulk-input-grid { flex-direction: column; }
+  .bulk-input-left,
+  .bulk-input-right { flex: none; width: 100%; }
 }

@@ -14,7 +14,10 @@ import {
   syncNow,
   getWeekAnchorMs,
   getWeekId,
-  formatWeekLabel
+  formatWeekLabel,
+  upsertMemberHistoryV2,
+  removeMemberHistoryV2,
+  getMemberHistoryV2Doc
 } from './database.js';
 import {
   calculateRankings,
@@ -65,9 +68,10 @@ export function showPage(pageId) {
 }
 
 export function toast(msg) {
+  const durationMs = arguments.length > 1 ? Number(arguments[1]) || 2500 : 2500;
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2500);
+  setTimeout(() => t.classList.remove('show'), durationMs);
 }
 
 // ==========================================
@@ -277,6 +281,7 @@ export function applyEditMember() {
 
   bumpUpdatedAt();
   saveAll();
+  syncMemberHistoryV2ForMember(id);
   renderMemberList();
   renderEntryList();
   renderBXH();
@@ -440,6 +445,8 @@ export function confirmModalCancelAll() {
 // ==========================================
 let activeMemberId = null;
 let modeAdd = { kill: true, destroy: true }; // True = Cộng dồn, False = Thay thế
+let entryHighlightedIndex = -1;
+let entryListEscClosed = false;
 
 export function toggleAdd(type) {
   modeAdd[type] = !modeAdd[type];
@@ -454,12 +461,31 @@ export function renderEntryList() {
   const list = state.members.filter(m => m.name.toLowerCase().includes(query));
   
   const container = document.getElementById('entry-member-list');
+  if (entryListEscClosed) {
+    container.innerHTML = '';
+    return;
+  }
+  if (list.length === 0) {
+    entryHighlightedIndex = -1;
+    container.innerHTML = '';
+    return;
+  }
+  if (entryHighlightedIndex >= list.length) entryHighlightedIndex = list.length - 1;
+  if (entryHighlightedIndex < -1) entryHighlightedIndex = -1;
   container.innerHTML = list.map(m => `
-    <div class="list-item ${activeMemberId === m.id ? 'selected' : ''}" onclick="selectForEntry('${m.id}')">
+    <div class="list-item ${activeMemberId === m.id ? 'selected' : ''}" data-entry-id="${m.id}" onclick="selectForEntry('${m.id}')">
       <span class="member-name">${m.name}</span>
       <span style="font-size:0.8rem; color:var(--text-dim)">Chọn ➔</span>
     </div>
   `).join('');
+  if (entryHighlightedIndex >= 0) {
+    const rows = container.querySelectorAll('.list-item');
+    const row = rows[entryHighlightedIndex];
+    if (row) {
+      row.classList.add('selected');
+      row.scrollIntoView({ block: 'nearest' });
+    }
+  }
 }
 
 export function selectForEntry(id) {
@@ -519,6 +545,28 @@ export function logMemberChange(kind, payload) {
 export function getEntryMemberOrder() {
   const query = (document.getElementById('search-entry')?.value || '').toLowerCase();
   return state.members.filter(m => m.name.toLowerCase().includes(query));
+}
+
+export function syncMemberHistoryV2ForMember(memberId, overrides) {
+  const m = state.members.find((x) => x.id === memberId);
+  if (!m) return;
+  const s = getStats(memberId);
+  const chestMap = buildMemberChestMap(computeBXH());
+  const now = Date.now();
+  const record = {
+    name: m.name,
+    kills: Number(s.kills) || 0,
+    sabotage: Number(s.destroy) || 0,
+    speed_total: Number(s.towerWeek) || 0,
+    speed_start: s.speed_start == null ? null : Number(s.speed_start) || 0,
+    speed_end: s.speed_end == null ? null : Number(s.speed_end) || 0,
+    chest: chestMap[memberId] || '',
+    last_updated: now,
+    ...(overrides || {})
+  };
+  upsertMemberHistoryV2(memberId, record).then(() => {
+    renderHistory();
+  }).catch(() => {});
 }
 
 export function applyEntryChanges() {
@@ -593,6 +641,7 @@ export function saveEntry(opts) {
     }
     bumpUpdatedAt();
     saveAll();
+    syncMemberHistoryV2ForMember(activeMemberId);
     toast('Đã lưu.');
   }
 
@@ -683,87 +732,34 @@ export function renderHistoryBXH(snapshot) {
 
 export function renderHistory() {
   const container = document.getElementById('history-content');
-  const statLogs = state.logs || [];
-  const memberLogs = state.memberLogs || [];
+  const historyV2 = getMemberHistoryV2Doc();
+  const membersMap = historyV2.members && typeof historyV2.members === 'object' ? historyV2.members : {};
+  const memberRows = Object.entries(membersMap)
+    .map(([memberId, row]) => ({ memberId, ...(row || {}) }))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
+  const memberTable = memberRows.length ? `
+    <h4 style="font-family:'Cinzel',serif; font-size:0.9rem; color:var(--gold); margin-bottom:0.4rem;">Lịch sử tuần hiện tại (${historyV2.week_id || ''})</h4>
+    <table>
+      <thead><tr><th>Tên</th><th class="num">Diệt</th><th class="num">Phá</th><th class="num">Tốc</th><th>Rương</th><th></th></tr></thead>
+      <tbody>
+        ${memberRows.map((row) => `
+          <tr>
+            <td class="member-name">${row.name || ''}</td>
+            <td class="num">${(Number(row.kills) || 0).toLocaleString()}</td>
+            <td class="num">${(Number(row.sabotage) || 0).toLocaleString()}</td>
+            <td class="num">${(Number(row.speed_total) || 0).toLocaleString()}</td>
+            <td>${row.chest || ''}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-sm" onclick="editHistoryMember('${row.memberId}')"><i class="fa-solid fa-pen"></i> Edit</button>
+              <button class="btn btn-sm btn-red" onclick="deleteHistoryMember('${row.memberId}')">Xóa</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  ` : '<div style="padding:1rem; text-align:center">Chưa có dữ liệu lịch sử tuần hiện tại.</div>';
+
   const weekHistory = state.weekHistory || [];
-  if(statLogs.length === 0 && memberLogs.length === 0 && weekHistory.length === 0) {
-    container.innerHTML = '<div style="padding:1rem; text-align:center">Chưa có dữ liệu.</div>';
-    return;
-  }
-  
-  const typeNames = { kill: 'Diệt địch', destroy: 'Phá thành', tower: 'Tháp canh' };
-  
-  const statTable = statLogs.length ? `
-    <h4 style="font-family:'Cinzel',serif; font-size:0.9rem; color:var(--gold); margin-bottom:0.4rem;">Nhập liệu chỉ số</h4>
-    <table>
-      <thead><tr><th>Thời gian</th><th>Thành viên</th><th>Thao tác</th><th>Hoàn tác</th></tr></thead>
-      <tbody>
-        ${statLogs.map(log => {
-          const mName = state.members.find(m => m.id === log.memberId)?.name || 'Đã xóa';
-          const time = new Date(log.time).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
-          let actionText = '';
-          if (log.type === 'tower') {
-            const ex = log.extra || {};
-            const start = typeof ex.start === 'number' ? ex.start : null;
-            const end = typeof ex.end === 'number' ? ex.end : null;
-            const gain = typeof ex.gain === 'number' ? ex.gain : log.amount;
-            if (start !== null && end !== null) {
-              actionText = `Tháp canh: Đầu tuần <b>${start}</b> ➜ Cuối tuần <b>${end}</b> (tăng <b>${gain}</b> lượt)`;
-            } else {
-              actionText = `Tháp canh: tăng <b>${gain}</b> lượt`;
-            }
-          } else {
-            actionText = `Cộng thêm <b>${log.amount}</b>`;
-          }
-
-          return `
-            <tr>
-              <td style="color:var(--text-dim); font-size:0.8rem">${time}</td>
-              <td class="member-name">${mName}</td>
-              <td><span style="font-size:0.8rem">${typeNames[log.type]}</span><br>${actionText}</td>
-              <td><button class="btn btn-sm btn-red" onclick="undoLog('${log.logId}')">Undo</button></td>
-            </tr>
-          `;
-        }).join('')}
-      </tbody>
-    </table>
-  ` : '';
-
-  const memberTable = memberLogs.length ? `
-    <h4 style="font-family:'Cinzel',serif; font-size:0.9rem; color:var(--gold); margin:1rem 0 0.4rem;">Lịch sử thành viên</h4>
-    <table>
-      <thead><tr><th>Thời gian</th><th>Thành viên</th><th>Thao tác</th></tr></thead>
-      <tbody>
-        ${memberLogs.map(log => {
-          const time = new Date(log.time).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
-          const p = log.payload || {};
-          let name = p.name || '';
-          if (!name && p.memberId) {
-            const m = state.members.find(x => x.id === p.memberId);
-            if (m) name = m.name;
-          }
-          let action = '';
-          if (log.kind === 'add') {
-            action = 'Thêm thành viên';
-          } else if (log.kind === 'remove') {
-            action = 'Xóa thành viên';
-          } else if (log.kind === 'rename') {
-            action = `Đổi tên từ <b>${p.oldName}</b> thành <b>${p.newName}</b>`;
-          } else if (log.kind === 'accountant') {
-            action = p.value ? 'Đặt làm kế toán' : 'Bỏ kế toán';
-          }
-          return `
-            <tr>
-              <td style="color:var(--text-dim); font-size:0.8rem">${time}</td>
-              <td class="member-name">${name}</td>
-              <td style="font-size:0.85rem">${action}</td>
-            </tr>
-          `;
-        }).join('')}
-      </tbody>
-    </table>
-  ` : '';
-
   const weekCards = weekHistory.length ? `
     <h4 style="font-family:'Cinzel',serif; font-size:0.9rem; color:var(--gold); margin:1rem 0 0.4rem;">Lịch sử BXH theo tuần</h4>
     <div class="week-history-list">
@@ -791,7 +787,68 @@ export function renderHistory() {
     </div>
   ` : '';
 
-  container.innerHTML = statTable + memberTable + weekCards;
+  container.innerHTML = memberTable + weekCards;
+}
+
+export function editHistoryMember(memberId) {
+  const historyV2 = getMemberHistoryV2Doc();
+  const row = historyV2.members?.[memberId];
+  if (!row) return;
+  const idEl = document.getElementById('edit-history-member-id');
+  const nameEl = document.getElementById('edit-history-member-name');
+  const killEl = document.getElementById('edit-history-member-kills');
+  const sabEl = document.getElementById('edit-history-member-sabotage');
+  const speedEl = document.getElementById('edit-history-member-speed-total');
+  const chestEl = document.getElementById('edit-history-member-chest');
+  const modal = document.getElementById('edit-history-member-modal');
+  if (!idEl || !nameEl || !killEl || !sabEl || !speedEl || !chestEl || !modal) return;
+  idEl.value = memberId;
+  nameEl.value = row.name || '';
+  killEl.value = Number(row.kills) || 0;
+  sabEl.value = Number(row.sabotage) || 0;
+  speedEl.value = Number(row.speed_total) || 0;
+  chestEl.value = row.chest || '';
+  modal.style.display = 'flex';
+}
+
+export function closeHistoryMemberEditModal() {
+  const modal = document.getElementById('edit-history-member-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+export async function applyHistoryMemberEdit() {
+  const idEl = document.getElementById('edit-history-member-id');
+  const nameEl = document.getElementById('edit-history-member-name');
+  const killEl = document.getElementById('edit-history-member-kills');
+  const sabEl = document.getElementById('edit-history-member-sabotage');
+  const speedEl = document.getElementById('edit-history-member-speed-total');
+  const chestEl = document.getElementById('edit-history-member-chest');
+  if (!idEl || !nameEl || !killEl || !sabEl || !speedEl || !chestEl) return;
+  const memberId = idEl.value;
+  const record = {
+    name: (nameEl.value || '').trim(),
+    kills: Math.max(0, parseInt(killEl.value || '0', 10) || 0),
+    sabotage: Math.max(0, parseInt(sabEl.value || '0', 10) || 0),
+    speed_total: Math.max(0, parseInt(speedEl.value || '0', 10) || 0),
+    speed_start: null,
+    speed_end: null,
+    chest: (chestEl.value || '').trim(),
+    last_updated: Date.now()
+  };
+  await upsertMemberHistoryV2(memberId, record);
+  closeHistoryMemberEditModal();
+  renderHistory();
+  toast('Đã cập nhật lịch sử thành viên.');
+}
+
+export async function deleteHistoryMember(memberId) {
+  const historyV2 = getMemberHistoryV2Doc();
+  const row = historyV2.members?.[memberId];
+  if (!row) return;
+  if (!confirm(`Xóa thành viên ${row.name || memberId} khỏi lịch sử tuần này?`)) return;
+  await removeMemberHistoryV2(memberId);
+  renderHistory();
+  toast('Đã xóa khỏi lịch sử tuần này.');
 }
 
 export function undoLog(logId) {
@@ -949,8 +1006,7 @@ export function openTowerEntryFromMembers(id) {
 
 export function newWeekSummary() {
   ensureWeek();
-  if (!confirm('Bạn có chắc muốn kết thúc tuần này và bắt đầu tuần mới? Dữ liệu sẽ được lưu lại trước khi reset.')) return;
-  finalizeCurrentWeekAndReset();
+  openNewWeekModal();
 }
 export function buildMemberChestMap(chestsOut) {
   const map = {};
@@ -1042,6 +1098,7 @@ export async function saveWeeklyHistoryRecord(doc) {
 }
 
 export async function finalizeCurrentWeekAndReset() {
+  const shouldSyncCloud = arguments.length > 0 ? !!arguments[0] : false;
   try {
     const doc = buildWeeklySnapshotDoc();
     await saveWeeklyHistoryRecord(doc);
@@ -1060,20 +1117,83 @@ export async function finalizeCurrentWeekAndReset() {
     state.meta.weekAnchorMs = nextAnchor;
     state.meta.weekLabel = formatWeekLabel(nextAnchor);
     state.meta.currentWeekId = getWeekId(nextAnchor);
-    if (cloud.enabled && cloud.db) {
+    if (cloud.enabled && cloud.db && shouldSyncCloud) {
       await cloud.db.collection('settings').doc('current_week').set({
         current_week: state.meta.currentWeekId,
         updated_at: Date.now()
       }, { merge: true });
+      const membersPayload = {};
+      state.members.forEach((m) => {
+        const s = getStats(m.id);
+        membersPayload[m.id] = {
+          name: m.name,
+          kills: Number(s.kills) || 0,
+          sabotage: Number(s.destroy) || 0,
+          speed_total: Number(s.towerWeek) || 0,
+          speed_start: null,
+          speed_end: null,
+          chest: '',
+          last_updated: Date.now()
+        };
+      });
+      await cloud.db.collection('minhchu_bxh').doc('current_week').set({
+        week_id: state.meta.currentWeekId,
+        updated_at: Date.now(),
+        members: membersPayload
+      });
     }
     bumpUpdatedAt();
     saveAll();
     renderBXH();
     renderHistory();
-    toast('Đã lưu lịch sử tuần và bắt đầu tuần mới.');
+    closeNewWeekModal();
+    toast('Đã cập nhật tuần mới ✓', 3000);
   } catch (e) {
     toast('Lỗi khi cập nhật tuần mới.');
   }
+}
+
+let newWeekModalStep = 1;
+export function openNewWeekModal() {
+  newWeekModalStep = 1;
+  renderNewWeekModalStep();
+  const modal = document.getElementById('new-week-modal');
+  if (modal) modal.style.display = 'flex';
+}
+export function closeNewWeekModal() {
+  const modal = document.getElementById('new-week-modal');
+  if (modal) modal.style.display = 'none';
+}
+export function nextNewWeekModalStep() {
+  newWeekModalStep = 2;
+  renderNewWeekModalStep();
+}
+export function skipNewWeekSync() {
+  finalizeCurrentWeekAndReset(false);
+}
+export function syncAndFinalizeNewWeek() {
+  finalizeCurrentWeekAndReset(true);
+}
+export function renderNewWeekModalStep() {
+  const titleEl = document.getElementById('new-week-modal-title');
+  const bodyEl = document.getElementById('new-week-modal-body');
+  const actionsEl = document.getElementById('new-week-modal-actions');
+  if (!titleEl || !bodyEl || !actionsEl) return;
+  if (newWeekModalStep === 1) {
+    titleEl.textContent = 'Cập nhật tuần mới';
+    bodyEl.innerHTML = 'Thao tác này sẽ:<br>✓ Lưu dữ liệu tuần hiện tại vào Lịch sử<br>✓ Reset toàn bộ số liệu về 0<br>Bạn có chắc chắn không?';
+    actionsEl.innerHTML = `
+      <button type="button" class="btn btn-red" onclick="closeNewWeekModal()">Huỷ</button>
+      <button type="button" class="btn btn-gold" onclick="nextNewWeekModalStep()">Tiếp tục →</button>
+    `;
+    return;
+  }
+  titleEl.textContent = 'Đồng bộ dữ liệu?';
+  bodyEl.innerHTML = 'Bạn có muốn đồng bộ lên Firebase để các thiết bị khác (điện thoại) cũng được cập nhật ngay không?';
+  actionsEl.innerHTML = `
+    <button type="button" class="btn btn-red" onclick="skipNewWeekSync()">Bỏ qua</button>
+    <button type="button" class="btn btn-gold" onclick="syncAndFinalizeNewWeek()">Đồng bộ &amp; Hoàn tất</button>
+  `;
 }
 
 
@@ -1081,10 +1201,52 @@ export function handleAtOpenList(ev) {
   if (ev.key === '@') {
     ev.preventDefault();
     ev.target.value = '';
+    entryListEscClosed = false;
+    entryHighlightedIndex = -1;
     renderEntryList();
     const list = document.getElementById('entry-member-list');
     if (list) list.scrollTop = 0;
+    return;
   }
+  const isSearch = ev.target && ev.target.id === 'search-entry';
+  if (!isSearch) return;
+  const order = getEntryMemberOrder();
+  if (!order.length) return;
+  if (ev.key === 'ArrowDown') {
+    ev.preventDefault();
+    entryListEscClosed = false;
+    entryHighlightedIndex = Math.min(order.length - 1, entryHighlightedIndex + 1);
+    renderEntryList();
+    return;
+  }
+  if (ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    entryListEscClosed = false;
+    entryHighlightedIndex = Math.max(0, entryHighlightedIndex - 1);
+    renderEntryList();
+    return;
+  }
+  if (ev.key === 'Enter' && entryHighlightedIndex >= 0) {
+    ev.preventDefault();
+    const selected = order[entryHighlightedIndex];
+    if (selected) {
+      selectForEntry(selected.id);
+      document.getElementById('inp-kill')?.focus();
+    }
+    return;
+  }
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    entryListEscClosed = true;
+    entryHighlightedIndex = -1;
+    renderEntryList();
+  }
+}
+
+export function handleEntrySearchInput() {
+  entryListEscClosed = false;
+  entryHighlightedIndex = -1;
+  renderEntryList();
 }
 export function handleEntryInputEnter(ev) {
   if (ev.key !== 'Enter') return;
@@ -1101,11 +1263,18 @@ export function handleEntryInputEnter(ev) {
 
 export function openBulkInputModal() {
   const m = document.getElementById('bulk-input-modal');
+  clearBulkErrorLog();
   if (m) m.style.display = 'flex';
 }
 export function closeBulkInputModal() {
   const m = document.getElementById('bulk-input-modal');
+  clearBulkErrorLog();
   if (m) m.style.display = 'none';
+}
+
+export function clearBulkErrorLog() {
+  const el = document.getElementById('bulk-error-log');
+  if (el) el.textContent = '';
 }
 
 export function applyBulkInput() {
@@ -1117,8 +1286,9 @@ export function applyBulkInput() {
   const touched = new Set();
   let skipped = 0;
   const unmatched = [];
+  const errorLines = [];
 
-  raw1.forEach((line) => {
+  raw1.forEach((line, idx) => {
     const t = line.trim();
     if (!t) return;
     const match = t.match(/^(.+?)\s+(\d[\d,]*)\s+(\d[\d,]*)$/);
@@ -1132,6 +1302,7 @@ export function applyBulkInput() {
     const m = nameToMember.get(name.toLowerCase());
     if (!m) {
       unmatched.push(name);
+      errorLines.push(`Dòng ${idx + 1}: "${t}" — Không tìm thấy thành viên`);
       skipped++;
       return;
     }
@@ -1141,7 +1312,7 @@ export function applyBulkInput() {
     touched.add(m.id);
   });
 
-  raw2.forEach((line) => {
+  raw2.forEach((line, idx) => {
     const t = line.trim();
     if (!t) return;
     const match = t.match(/^(.+?)\s+(\d[\d,]*)$/);
@@ -1154,6 +1325,7 @@ export function applyBulkInput() {
     const m = nameToMember.get(name.toLowerCase());
     if (!m) {
       if (!unmatched.includes(name)) unmatched.push(name);
+      errorLines.push(`Dòng ${idx + 1}: "${t}" — Không tìm thấy thành viên`);
       skipped++;
       return;
     }
@@ -1171,13 +1343,17 @@ export function applyBulkInput() {
 
   bumpUpdatedAt();
   saveAll();
+  touched.forEach((id) => syncMemberHistoryV2ForMember(id));
   renderBXH();
   renderMemberList();
   renderEntryList();
-  closeBulkInputModal();
+  const logEl = document.getElementById('bulk-error-log');
+  if (logEl) {
+    logEl.textContent = errorLines.length ? errorLines.join('\n') : '';
+  }
   toast(`Đã cập nhật ${touched.size} thành viên, bỏ qua ${skipped} dòng.`);
   if (unmatched.length) {
-    toast('Không khớp tên: ' + unmatched.slice(0, 12).join(', ') + (unmatched.length > 12 ? '…' : ''));
+    toast('Đã ghi log lỗi tên không khớp.');
   }
 }
 
